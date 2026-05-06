@@ -97,6 +97,18 @@
             /* border: 1px dashed #888; */ /* Default border, JS can override or set to transparent if only glow needed */
             /* pointer-events: none; */ /* If clicks should pass through to members. For selection, this should be auto or initial. */
         }
+        #anchor-viz {
+            position: absolute;
+            width: 8px;
+            height: 8px;
+            background-color: magenta;
+            border-radius: 50%;
+            pointer-events: none;
+            z-index: 10000;
+            display: none;
+            transform: translate(-50%, -50%);
+            border: 1px solid white;
+        }
     </style>
 </head>
 <body>
@@ -104,19 +116,19 @@
     <div class="controls">
         <div>
             <label for="rect-x">X:</label>
-            <input type="number" id="rect-x">
+            <input type="text" id="rect-x">
         </div>
         <div>
             <label for="rect-y">Y:</label>
-            <input type="number" id="rect-y">
+            <input type="text" id="rect-y">
         </div>
         <div>
             <label for="rect-width">Szélesség:</label>
-            <input type="number" id="rect-width">
+            <input type="text" id="rect-width">
         </div>
         <div>
             <label for="rect-height">Magasság:</label>
-            <input type="number" id="rect-height">
+            <input type="text" id="rect-height">
         </div>
         <button id="add-rect-btn">+</button>
         <button id="delete-rect-btn" style="display: none; margin-left: 10px;">Kijelölt törlése</button>
@@ -127,6 +139,7 @@
         <button id="rotate-ccw-btn" style="display: none; margin-left: 5px;">↺</button>
         <button id="save-btn" style="margin-left: 20px;">Mentés</button>
         <button id="load-btn">Betöltés</button>
+        <button id="export-svg-btn">SVG Export</button>
         <button id="reset-btn">Alaphelyzet</button>
         
         <div style="display: inline-flex; align-items: baseline; margin-top: 10px; vertical-align: middle;">
@@ -154,6 +167,7 @@
 
     <div id="canvas">
         <!-- Ide kerülnek a téglalapok -->
+        <div id="anchor-viz"></div>
     </div>
 
     <script src="canvasObjects.js"></script>
