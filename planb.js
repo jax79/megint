@@ -1,5 +1,6 @@
 document.addEventListener('DOMContentLoaded', () => {
     const canvas = document.getElementById('canvas');
+    const viewport = document.getElementById('viewport');
     const rectXInput = document.getElementById('rect-x');
     const rectYInput = document.getElementById('rect-y');
     const rectWidthInput = document.getElementById('rect-width');
@@ -14,10 +15,14 @@ document.addEventListener('DOMContentLoaded', () => {
     const rotateCcwBtn = document.getElementById('rotate-ccw-btn');
     const resetZoomBtn = document.getElementById('reset-zoom-btn');
     const zoomLevelSelect = document.getElementById('zoom-level-select');
+    const zoomInput = document.getElementById('zoom-input');
     const groupBtn = document.getElementById('group-btn');
     const ungroupBtn = document.getElementById('ungroup-btn');
     const exportSvgBtn = document.getElementById('export-svg-btn');
     const anchorViz = document.getElementById('anchor-viz');
+    const selectModeBtn = document.getElementById('select-mode-btn');
+    const panModeBtn = document.getElementById('pan-mode-btn');
+    const fitBtn = document.getElementById('fit-btn');
 
     let selectedRectsDOM = [];
     let primarySelectedBaseRect = null;
@@ -25,14 +30,20 @@ document.addEventListener('DOMContentLoaded', () => {
     let groupCounter = 0;
 
     let isDragging = false;
+    let isPanning = false;
+    let interactionMode = 'select'; // 'select' or 'pan'
+
     let dragOffsets_base = [];
     let justDragged = false;
     let currentHighestZIndex = 1;
 
     let logicalZoom = 1.0;
+    let panX = 0;
+    let panY = 0;
+
     const ZOOM_SPEED = 0.05;
-    const MIN_ZOOM = 0.2;
-    const MAX_ZOOM = 3.0;
+    const MIN_ZOOM = 0.05;
+    const MAX_ZOOM = 10.0;
 
     let baseRectangles = [];
     let draggedItems = [];
@@ -89,11 +100,8 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
         const anchorOffset = getAnchorOffsetInBaseCoords(item, currentAnchorPoint);
-        const physicalX = (item.x + anchorOffset.x) * logicalZoom;
-        const physicalY = (item.y + anchorOffset.y) * logicalZoom;
-
-        anchorViz.style.left = physicalX + 'px';
-        anchorViz.style.top = physicalY + 'px';
+        anchorViz.style.left = (item.x + anchorOffset.x) + 'px';
+        anchorViz.style.top = (item.y + anchorOffset.y) + 'px';
         anchorViz.style.display = 'block';
     }
 
@@ -110,33 +118,53 @@ document.addEventListener('DOMContentLoaded', () => {
         baseRectangles.forEach(item => {
             if (item.type === 'group' && item.domElement) item.removeDomElement();
         });
-        const allRects = canvas.querySelectorAll('.rectangle');
+        const allRects = viewport.querySelectorAll('.rectangle');
         allRects.forEach(rect => rect.remove());
         selectedRectsDOM = []; primarySelectedBaseRect = null;
         updateInputFields(null);
         rectCounter = 0; groupCounter = 0; baseRectangles = []; currentHighestZIndex = 1;
-        logicalZoom = 1.0; canvas.style.backgroundSize = `${10 * logicalZoom}px ${10 * logicalZoom}px`;
+        logicalZoom = 1.0; panX = 0; panY = 0;
         updateZoomDisplay(); renderAllRectangles();
     }
 
     function renderAllRectangles() {
+        viewport.style.transform = `translate(${panX}px, ${panY}px) scale(${logicalZoom})`;
+        canvas.style.backgroundSize = `${10 * logicalZoom}px ${10 * logicalZoom}px`;
+        canvas.style.backgroundPosition = `${panX}px ${panY}px`;
+
         baseRectangles.forEach(item => {
             if (item.type === 'rectangle') {
                 if (item.domElement) {
-                    item.domElement.style.left = (item.x * logicalZoom) + 'px';
-                    item.domElement.style.top = (item.y * logicalZoom) + 'px';
-                    item.domElement.style.width = (item.w * logicalZoom) + 'px';
-                    item.domElement.style.height = (item.h * logicalZoom) + 'px';
+                    item.domElement.style.left = item.x + 'px';
+                    item.domElement.style.top = item.y + 'px';
+                    item.domElement.style.width = item.w + 'px';
+                    item.domElement.style.height = item.h + 'px';
                     item.domElement.style.zIndex = item.zIndex;
                 }
             } else if (item.type === 'group') {
-                item.createOrUpdateDomElement(canvas, logicalZoom);
+                // Modified createOrUpdateDomElement logic for no-zoom positioning
+                if (!item.domElement) {
+                    item.domElement = document.createElement('div');
+                    item.domElement.id = `group-dom-${item.id}`;
+                    item.domElement.classList.add('rectangle');
+                    item.domElement.classList.add('group-boundary');
+                    viewport.appendChild(item.domElement);
+                }
+                item.domElement.style.left = item.x + 'px';
+                item.domElement.style.top = item.y + 'px';
+                item.domElement.style.width = item.w + 'px';
+                item.domElement.style.height = item.h + 'px';
+                item.domElement.style.zIndex = item.zIndex;
+                item.domElement.style.backgroundColor = 'rgba(0,0,0,0)';
+                item.domElement.style.border = '1px dashed #888';
             }
         });
         if (primarySelectedBaseRect) updateAnchorViz(primarySelectedBaseRect);
     }
 
     function updateZoomDisplay() {
+        const zoomPercent = Math.round(logicalZoom * 100) + '%';
+        zoomInput.value = zoomPercent;
         if (zoomLevelSelect) {
             let foundMatch = false;
             for (let i = 0; i < zoomLevelSelect.options.length; i++) {
@@ -146,6 +174,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     foundMatch = true; break;
                 }
             }
+            if (!foundMatch) zoomLevelSelect.value = "";
         }
     }
 
@@ -173,6 +202,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function handleItemMouseDown(event) {
+        if (interactionMode !== 'select') return;
         event.preventDefault(); event.stopPropagation();
         const clickedDomId = this.id;
         let clickedItemInstance = baseRectangles.find(br => br.id === clickedDomId);
@@ -211,8 +241,8 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         updateInputFields(primarySelectedBaseRect); renderAllRectangles();
         isDragging = true; draggedItems = []; dragOffsets_base = [];
-        const mousePosOnCanvas = getMousePositionOnCanvas(event);
-        const mouseBasePos = { x: mousePosOnCanvas.x / logicalZoom, y: mousePosOnCanvas.y / logicalZoom };
+        const mouseBasePos = getMouseBasePosition(event);
+
         if (primarySelectedBaseRect && primarySelectedBaseRect.domElement && selectedRectsDOM.includes(primarySelectedBaseRect.domElement)) {
             draggedItems = [primarySelectedBaseRect];
             if (selectedRectsDOM.length > 1) {
@@ -231,20 +261,12 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         if (draggedItems.length > 0) {
-            if (draggedItems.length === 1 && draggedItems[0].type === 'group') {
-                const group = draggedItems[0];
-                dragOffsets_base.push({ id: group.id, type: 'group', offsetX: mouseBasePos.x - group.x, offsetY: mouseBasePos.y - group.y });
-                currentHighestZIndex++; group.zIndex = currentHighestZIndex;
-            } else {
-                draggedItems.forEach(item => {
-                    const itemAnchorOffset = (item.type === 'group') ? {x:0,y:0} : getAnchorOffsetInBaseCoords(item, currentAnchorPoint);
-                    dragOffsets_base.push({ id: item.id, type: item.type, offsetX: mouseBasePos.x - (item.x + itemAnchorOffset.x), offsetY: mouseBasePos.y - (item.y + itemAnchorOffset.y) });
-                });
-                if (draggedItems.length > 0) {
-                    draggedItems.sort((a, b) => a.zIndex - b.zIndex);
-                    draggedItems.forEach(item => { currentHighestZIndex++; item.zIndex = currentHighestZIndex; });
-                }
-            }
+            draggedItems.forEach(item => {
+                const itemAnchorOffset = (item.type === 'group') ? {x:0,y:0} : getAnchorOffsetInBaseCoords(item, currentAnchorPoint);
+                dragOffsets_base.push({ id: item.id, type: item.type, offsetX: mouseBasePos.x - (item.x + itemAnchorOffset.x), offsetY: mouseBasePos.y - (item.y + itemAnchorOffset.y) });
+            });
+            draggedItems.sort((a, b) => a.zIndex - b.zIndex);
+            draggedItems.forEach(item => { currentHighestZIndex++; item.zIndex = currentHighestZIndex; });
             renderAllRectangles();
         }
     }
@@ -261,9 +283,12 @@ document.addEventListener('DOMContentLoaded', () => {
         return { x: offsetX, y: offsetY };
     }
 
-    function getMousePositionOnCanvas(event) {
+    function getMouseBasePosition(event) {
         const canvasRect = canvas.getBoundingClientRect();
-        return { x: event.clientX - canvasRect.left, y: event.clientY - canvasRect.top };
+        return {
+            x: (event.clientX - canvasRect.left - panX) / logicalZoom,
+            y: (event.clientY - canvasRect.top - panY) / logicalZoom
+        };
     }
 
     function swapSelectedRectangleDimensions(direction = 'cw') {
@@ -295,22 +320,16 @@ document.addEventListener('DOMContentLoaded', () => {
                 getAllLeafMembers(groupToRotate, leafMembers);
                 itemsToProcess = leafMembers;
             } else {
-                // If multiple items are selected, find their bounding box to rotate around
                 let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
                 itemsToProcess.forEach(it => {
-                    minX = Math.min(minX, it.x);
-                    minY = Math.min(minY, it.y);
-                    maxX = Math.max(maxX, it.x + it.w);
-                    maxY = Math.max(maxY, it.y + it.h);
+                    minX = Math.min(minX, it.x); minY = Math.min(minY, it.y);
+                    maxX = Math.max(maxX, it.x + it.w); maxY = Math.max(maxY, it.y + it.h);
                 });
                 const tempRect = { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
                 const anchorOffset = getAnchorOffsetInBaseCoords(tempRect, currentAnchorPoint);
                 anchorGX = tempRect.x + anchorOffset.x;
                 anchorGY = tempRect.y + anchorOffset.y;
 
-                // If individual items are rotated, we should also handle groups if they were in itemsToProcess
-                // Actually itemsToProcess should contain top-level selected items.
-                // Let's refine this to process all leaf members of all selected items.
                 const allLeafs = [];
                 itemsToProcess.forEach(it => {
                     if (it.type === 'rectangle') allLeafs.push(it);
@@ -327,9 +346,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
                 let rotatedX, rotatedY;
                 if (direction === 'cw') {
+                    // Clockwise rotation (90 deg): (x, y) -> (-y, x)
                     rotatedX = -translatedY;
                     rotatedY = translatedX;
                 } else { // ccw
+                    // Counter-clockwise rotation (90 deg): (x, y) -> (y, -x)
                     rotatedX = translatedY;
                     rotatedY = -translatedX;
                 }
@@ -345,43 +366,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 memberRect.y = newGlobalMemberCenterY - newMemberH / 2;
             });
 
-            // Update bounding boxes for all top-level groups
-            baseRectangles.forEach(br => {
-                if (br.type === 'group' && br.parentId === null) updateAllBoundingBoxes(br);
-            });
-
-            // NOW: Alignment shift.
-            // We want the NEW anchor point of the selection to be at the SAME physical position (anchorGX, anchorGY)
-            let newMinX = Infinity, newMinY = Infinity, newMaxX = -Infinity, newMaxY = -Infinity;
-            // Note: itemsToProcess now contains the leaf rectangles that were actually rotated.
-            // But we need the bounding box of the whole selection that was rotated.
-            // If it was a single group, use the group's new box.
-            if (groupToRotate) {
-                newMinX = groupToRotate.x; newMinY = groupToRotate.y;
-                newMaxX = groupToRotate.x + groupToRotate.w; newMaxY = groupToRotate.y + groupToRotate.h;
-            } else {
-                itemsToProcess.forEach(it => {
-                    newMinX = Math.min(newMinX, it.x);
-                    newMinY = Math.min(newMinY, it.y);
-                    newMaxX = Math.max(newMaxX, it.x + it.w);
-                    newMaxY = Math.max(newMaxY, it.y + it.h);
-                });
-            }
-
-            const newTempRect = { x: newMinX, y: newMinY, w: newMaxX - newMinX, h: newMaxY - newMinY };
-            const newAnchorOffset = getAnchorOffsetInBaseCoords(newTempRect, currentAnchorPoint);
-            const newAnchorGX = newTempRect.x + newAnchorOffset.x;
-            const newAnchorGY = newTempRect.y + newAnchorOffset.y;
-
-            const shiftX = anchorGX - newAnchorGX;
-            const shiftY = anchorGY - newAnchorGY;
-
-            itemsToProcess.forEach(it => {
-                it.x += shiftX;
-                it.y += shiftY;
-            });
-
-            // Re-update bounding boxes after shift
             baseRectangles.forEach(br => {
                 if (br.type === 'group' && br.parentId === null) updateAllBoundingBoxes(br);
             });
@@ -404,20 +388,24 @@ document.addEventListener('DOMContentLoaded', () => {
         primarySelectedBaseRect = null; updateInputFields(null);
     }
 
-    function selectRectangle(domElementToSelect) {
-        const baseRectToSelect = baseRectangles.find(br => br.domElement === domElementToSelect);
-        if (!baseRectToSelect) { console.warn("selectRectangle: baseRect not found for domEl", domElementToSelect); return; }
-        const topLevelSelectable = getTopMostParent(baseRectToSelect);
-        if (topLevelSelectable.domElement) {
+    function selectItem(item) {
+        if (!item) return;
+        const topLevelSelectable = getTopMostParent(item);
+        if (topLevelSelectable.type === 'rectangle') {
              clearAndSetPrimarySelection(topLevelSelectable, topLevelSelectable.domElement);
         } else if (topLevelSelectable.type === 'group') {
             deselectAllRectanglesStyling(); selectedRectsDOM = [];
             primarySelectedBaseRect = topLevelSelectable; currentHighestZIndex++; topLevelSelectable.zIndex = currentHighestZIndex;
-            if (!topLevelSelectable.domElement) topLevelSelectable.createOrUpdateDomElement(canvas, logicalZoom);
-            if (topLevelSelectable.domElement) {
-                 selectedRectsDOM.push(topLevelSelectable.domElement);
-                 topLevelSelectable.domElement.classList.add('selected');
+            if (!topLevelSelectable.domElement) {
+                topLevelSelectable.domElement = document.createElement('div');
+                topLevelSelectable.domElement.id = `group-dom-${topLevelSelectable.id}`;
+                topLevelSelectable.domElement.classList.add('rectangle');
+                topLevelSelectable.domElement.classList.add('group-boundary');
+                viewport.appendChild(topLevelSelectable.domElement);
+                topLevelSelectable.domElement.addEventListener('mousedown', handleItemMouseDown);
             }
+            selectedRectsDOM.push(topLevelSelectable.domElement);
+            topLevelSelectable.domElement.classList.add('selected');
         }
         updateInputFields(primarySelectedBaseRect); renderAllRectangles();
     }
@@ -428,13 +416,35 @@ document.addEventListener('DOMContentLoaded', () => {
         const newRectangleInstance = new CanvasRectangle(newRectId, baseX, baseY, baseW, baseH, 1, rectElement, null);
         baseRectangles.push(newRectangleInstance);
         rectElement.addEventListener('mousedown', handleItemMouseDown);
-        canvas.appendChild(rectElement); renderAllRectangles(); selectRectangle(rectElement);
+        viewport.appendChild(rectElement); renderAllRectangles(); selectItem(newRectangleInstance);
     }
 
+    let lastMouseX, lastMouseY;
+
+    canvas.addEventListener('mousedown', (event) => {
+        if (interactionMode === 'pan' || event.button === 1) {
+            isPanning = true;
+            lastMouseX = event.clientX;
+            lastMouseY = event.clientY;
+            canvas.style.cursor = 'grabbing';
+            event.preventDefault();
+        }
+    });
+
     document.addEventListener('mousemove', (event) => {
+        if (isPanning) {
+            const dx = event.clientX - lastMouseX;
+            const dy = event.clientY - lastMouseY;
+            panX += dx;
+            panY += dy;
+            lastMouseX = event.clientX;
+            lastMouseY = event.clientY;
+            renderAllRectangles();
+            return;
+        }
+
         if (!isDragging || draggedItems.length === 0) return;
-        const mousePosOnCanvas = getMousePositionOnCanvas(event);
-        const mouseBasePos = { x: mousePosOnCanvas.x / logicalZoom, y: mousePosOnCanvas.y / logicalZoom };
+        const mouseBasePos = getMouseBasePosition(event);
 
         draggedItems.forEach(item => {
             const offsetInfo = dragOffsets_base.find(offset => offset.id === item.id);
@@ -461,6 +471,10 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     document.addEventListener('mouseup', (event) => {
+        if (isPanning) {
+            isPanning = false;
+            canvas.style.cursor = interactionMode === 'pan' ? 'grab' : 'default';
+        }
         if (isDragging) {
             draggedItems.forEach(item => { if (item.type === 'group') updateAllBoundingBoxes(item); });
             if (primarySelectedBaseRect) updateInputFields(primarySelectedBaseRect);
@@ -479,18 +493,17 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     canvas.addEventListener('click', (event) => {
-        if (justDragged) { justDragged = false; return; }
-        const canvasRect = canvas.getBoundingClientRect();
-        const clickX = (event.clientX - canvasRect.left); const clickY = (event.clientY - canvasRect.top);
+        if (justDragged || isPanning) { justDragged = false; return; }
+        if (interactionMode !== 'select') return;
+
+        // Find clicked item manually because viewport transformation might confuse simple DOM click
+        const mouseBasePos = getMouseBasePosition(event);
         let clickedOnAnyItem = false;
         for (let i = baseRectangles.length - 1; i >= 0; i--) {
             const item = baseRectangles[i];
-            if (item.domElement) {
-                 const itemLeftPx = parseFloat(item.domElement.style.left); const itemTopPx = parseFloat(item.domElement.style.top);
-                 const itemWidthPx = parseFloat(item.domElement.style.width); const itemHeightPx = parseFloat(item.domElement.style.height);
-                if (clickX >= itemLeftPx && clickX <= itemLeftPx + itemWidthPx && clickY >= itemTopPx && clickY <= itemTopPx + itemHeightPx) {
-                    clickedOnAnyItem = true; break;
-                }
+            if (mouseBasePos.x >= item.x && mouseBasePos.x <= item.x + item.w &&
+                mouseBasePos.y >= item.y && mouseBasePos.y <= item.y + item.h) {
+                clickedOnAnyItem = true; break;
             }
         }
         if (!clickedOnAnyItem) deselectAllRectangles();
@@ -568,21 +581,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
     [rectXInput, rectYInput, rectWidthInput, rectHeightInput].forEach(input => {
         input.addEventListener('keydown', (event) => {
-            if (event.key === 'Enter') {
-                handleInputChange(input);
-                input.blur();
-            }
+            if (event.key === 'Enter') { handleInputChange(input); input.blur(); }
         });
-        input.addEventListener('blur', () => {
-            handleInputChange(input);
-        });
+        input.addEventListener('blur', () => { handleInputChange(input); });
         input.addEventListener('keypress', (event) => {
             const charCode = (event.which) ? event.which : event.keyCode;
             const allowedChars = /[0-9+\-*/().\s]/;
-            const charStr = String.fromCharCode(charCode);
-            if (charCode > 31 && !allowedChars.test(charStr) && charCode !== 13) {
-                event.preventDefault();
-            }
+            if (charCode > 31 && !allowedChars.test(String.fromCharCode(charCode)) && charCode !== 13) event.preventDefault();
         });
     });
 
@@ -612,6 +617,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (indexInBase > -1) baseRectangles.splice(indexInBase, 1);
             });
             selectedRectsDOM = []; primarySelectedBaseRect = null; updateInputFields(null);
+            renderAllRectangles();
         }
     });
 
@@ -621,9 +627,8 @@ document.addEventListener('DOMContentLoaded', () => {
             if (item.type === 'group') plainItem.members = item.members.map(member => member.id);
             return plainItem;
         });
-        const editorData = { canvasObjects: dataToSave, settings: { rectCounter, groupCounter, currentHighestZIndex, logicalZoom } };
-        const jsonString = JSON.stringify(editorData, null, 2);
-        const blob = new Blob([jsonString], {type: 'application/json'});
+        const editorData = { canvasObjects: dataToSave, settings: { rectCounter, groupCounter, currentHighestZIndex, logicalZoom, panX, panY } };
+        const blob = new Blob([JSON.stringify(editorData, null, 2)], {type: 'application/json'});
         const url = URL.createObjectURL(blob); const a = document.createElement('a');
         a.href = url; a.download = 'canvas_layout.json'; document.body.appendChild(a); a.click();
         document.body.removeChild(a); URL.revokeObjectURL(url);
@@ -636,20 +641,21 @@ document.addEventListener('DOMContentLoaded', () => {
             const file = event.target.files[0]; if (!file) return;
             const reader = new FileReader();
             reader.onload = (e) => {
-                const fileContent = e.target.result;
                 try {
-                    const loadedData = JSON.parse(fileContent);
-                    if (loadedData && loadedData.canvasObjects && Array.isArray(loadedData.canvasObjects)) {
+                    const loadedData = JSON.parse(e.target.result);
+                    if (loadedData && loadedData.canvasObjects) {
                         clearCanvas();
                         if(loadedData.settings){
                             rectCounter = loadedData.settings.rectCounter || 0; groupCounter = loadedData.settings.groupCounter || 0;
-                            currentHighestZIndex = loadedData.settings.currentHighestZIndex || 1; logicalZoom = loadedData.settings.logicalZoom || 1.0;
+                            currentHighestZIndex = loadedData.settings.currentHighestZIndex || 1;
+                            logicalZoom = loadedData.settings.logicalZoom || 1.0;
+                            panX = loadedData.settings.panX || 0; panY = loadedData.settings.panY || 0;
                         }
                         const itemMap = new Map(); baseRectangles = [];
                         loadedData.canvasObjects.forEach(itemData => {
                             let newItem;
                             if (itemData.type === 'rectangle') {
-                                const domEl = document.createElement('div'); domEl.id = itemData.id; domEl.classList.add('rectangle'); canvas.appendChild(domEl);
+                                const domEl = document.createElement('div'); domEl.id = itemData.id; domEl.classList.add('rectangle'); viewport.appendChild(domEl);
                                 newItem = new CanvasRectangle(itemData.id, itemData.x, itemData.y, itemData.w, itemData.h, itemData.zIndex, domEl, itemData.parentId);
                                 domEl.addEventListener('mousedown', handleItemMouseDown);
                             } else if (itemData.type === 'group') {
@@ -663,24 +669,14 @@ document.addEventListener('DOMContentLoaded', () => {
                             if (item.type === 'group' && itemData.members) {
                                 itemData.members.forEach(memberId => {
                                     const memberInstance = itemMap.get(memberId);
-                                    if (memberInstance && !item.members.includes(memberInstance)) item.addMember(memberInstance);
+                                    if (memberInstance) item.addMember(memberInstance);
                                 });
                             }
                         });
                         renderAllRectangles(); updateZoomDisplay();
                         if (baseRectangles.length > 0) {
-                            let topItem = null; let highestZ = -Infinity;
-                            baseRectangles.filter(it => it.parentId === null).forEach(br => { if (br.zIndex > highestZ) { highestZ = br.zIndex; topItem = br; } });
-                            if (topItem) {
-                                if (topItem.domElement) selectRectangle(topItem.domElement);
-                                else if (topItem.type === 'group') {
-                                    topItem.createOrUpdateDomElement(canvas, logicalZoom);
-                                    if (topItem.domElement) {
-                                        topItem.domElement.addEventListener('mousedown', handleItemMouseDown);
-                                        selectRectangle(topItem.domElement);
-                                    }
-                                }
-                            }
+                            let topItem = baseRectangles.filter(it => it.parentId === null).sort((a,b) => b.zIndex - a.zIndex)[0];
+                            if (topItem) selectItem(topItem);
                         }
                     }
                 } catch (error) { console.error(error); }
@@ -697,15 +693,12 @@ document.addEventListener('DOMContentLoaded', () => {
         const newX = originalItem.x + xOffset;
         const newY = originalItem.y + yOffset;
         currentHighestZIndex++;
-
         if (originalItem.type === 'rectangle') {
             const newId = `rect-${rectCounter++}`;
             const rectElement = document.createElement('div');
-            rectElement.id = newId;
-            rectElement.classList.add('rectangle');
+            rectElement.id = newId; rectElement.classList.add('rectangle');
             newItem = new CanvasRectangle(newId, newX, newY, originalItem.w, originalItem.h, currentHighestZIndex, rectElement, newParentIdForMembers);
-            baseRectangles.push(newItem);
-            canvas.appendChild(rectElement);
+            baseRectangles.push(newItem); viewport.appendChild(rectElement);
             rectElement.addEventListener('mousedown', handleItemMouseDown);
         } else if (originalItem.type === 'group') {
             const newId = `group-${groupCounter++}`;
@@ -715,10 +708,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 const duplicatedMember = duplicateItemRecursive(member, newItem.id, xOffset, yOffset);
                 newItem.addMember(duplicatedMember);
             });
-            newItem.calculateBoundingBox();
-            baseRectangles.push(newItem);
-            newItem.createOrUpdateDomElement(canvas, logicalZoom);
-            if (newItem.domElement) newItem.domElement.addEventListener('mousedown', handleItemMouseDown);
+            newItem.calculateBoundingBox(); baseRectangles.push(newItem);
         }
         return newItem;
     }
@@ -726,15 +716,10 @@ document.addEventListener('DOMContentLoaded', () => {
     duplicateRectBtn.addEventListener('click', () => {
         let itemsToDuplicateSource = [];
         if (selectedRectsDOM.length > 0) {
-            itemsToDuplicateSource = selectedRectsDOM.map(domEl =>
-                baseRectangles.find(br => br.domElement === domEl)
-            ).filter(instance => instance);
-        } else if (primarySelectedBaseRect) {
-            itemsToDuplicateSource = [primarySelectedBaseRect];
-        }
+            itemsToDuplicateSource = selectedRectsDOM.map(domEl => baseRectangles.find(br => br.domElement === domEl)).filter(instance => instance);
+        } else if (primarySelectedBaseRect) itemsToDuplicateSource = [primarySelectedBaseRect];
         if (itemsToDuplicateSource.length === 0) return;
-        deselectAllRectanglesStyling();
-        selectedRectsDOM = [];
+        deselectAllRectanglesStyling(); selectedRectsDOM = [];
         const newTopLevelItems = [];
         itemsToDuplicateSource.forEach(itemToDuplicate => {
             const newDuplicatedItem = duplicateItemRecursive(itemToDuplicate, null, 10, 10);
@@ -743,14 +728,10 @@ document.addEventListener('DOMContentLoaded', () => {
         if (newTopLevelItems.length > 0) {
             primarySelectedBaseRect = newTopLevelItems[0];
             newTopLevelItems.forEach(item => {
-                if (item.domElement) {
-                    selectedRectsDOM.push(item.domElement);
-                    item.domElement.classList.add('selected');
-                }
+                if (item.domElement) { selectedRectsDOM.push(item.domElement); item.domElement.classList.add('selected'); }
             });
         }
-        updateInputFields(primarySelectedBaseRect);
-        renderAllRectangles();
+        updateInputFields(primarySelectedBaseRect); renderAllRectangles();
     });
 
     rotateCwBtn.addEventListener('click', () => swapSelectedRectangleDimensions('cw'));
@@ -762,22 +743,49 @@ document.addEventListener('DOMContentLoaded', () => {
         let newLogicalZoom = logicalZoom + delta;
         newLogicalZoom = Math.max(MIN_ZOOM, newLogicalZoom); newLogicalZoom = Math.min(MAX_ZOOM, newLogicalZoom);
         if (newLogicalZoom === logicalZoom) return;
-        logicalZoom = newLogicalZoom; canvas.style.backgroundSize = `${10 * logicalZoom}px ${10 * logicalZoom}px`;
+
+        // Zoom relative to mouse position
+        const mouseCanvasX = event.clientX - canvas.getBoundingClientRect().left;
+        const mouseCanvasY = event.clientY - canvas.getBoundingClientRect().top;
+        const mouseBaseX = (mouseCanvasX - panX) / logicalZoom;
+        const mouseBaseY = (mouseCanvasY - panY) / logicalZoom;
+
+        logicalZoom = newLogicalZoom;
+        panX = mouseCanvasX - mouseBaseX * logicalZoom;
+        panY = mouseCanvasY - mouseBaseY * logicalZoom;
+
         renderAllRectangles(); updateZoomDisplay();
     });
 
     resetZoomBtn.addEventListener('click', () => {
-        logicalZoom = 1.0; canvas.style.backgroundSize = `${10 * logicalZoom}px ${10 * logicalZoom}px`;
+        logicalZoom = 1.0; panX = 0; panY = 0;
         updateZoomDisplay(); renderAllRectangles();
     });
 
-    const zoomPercentages = [25, 50, 75, 100, 125, 150, 200, 400];
+    const zoomPercentages = [5, 10, 25, 50, 75, 100, 125, 150, 200, 400, 800];
     zoomPercentages.forEach(percentage => {
         const option = document.createElement('option');
         option.value = percentage / 100; option.textContent = `${percentage}%`;
         if (zoomLevelSelect) zoomLevelSelect.appendChild(option);
     });
-    updateZoomDisplay();
+
+    zoomLevelSelect.addEventListener('change', (event) => {
+        const newLogicalZoom = parseFloat(event.target.value);
+        if (!isNaN(newLogicalZoom)) {
+            logicalZoom = newLogicalZoom; renderAllRectangles(); updateZoomDisplay();
+        }
+    });
+
+    zoomInput.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter') {
+            let val = parseFloat(zoomInput.value.replace('%', ''));
+            if (!isNaN(val)) {
+                logicalZoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, val / 100));
+                renderAllRectangles(); updateZoomDisplay();
+            }
+            zoomInput.blur();
+        }
+    });
 
     const anchorRadioButtons = document.querySelectorAll('input[name="anchor-point"]');
     anchorRadioButtons.forEach(radio => {
@@ -787,38 +795,33 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     });
 
-    zoomLevelSelect.addEventListener('change', (event) => {
-        const newLogicalZoom = parseFloat(event.target.value);
-        if (!isNaN(newLogicalZoom) && newLogicalZoom >= MIN_ZOOM && newLogicalZoom <= MAX_ZOOM) {
-            logicalZoom = newLogicalZoom; canvas.style.backgroundSize = `${10 * logicalZoom}px ${10 * logicalZoom}px`;
-            renderAllRectangles(); updateZoomDisplay();
-        }
+    selectModeBtn.addEventListener('click', () => {
+        interactionMode = 'select';
+        selectModeBtn.classList.add('mode-active');
+        panModeBtn.classList.remove('mode-active');
+        canvas.style.cursor = 'default';
     });
 
-    document.addEventListener('keydown', (event) => {
-        const activeTagName = document.activeElement ? document.activeElement.tagName : null;
-        const isInputFocused = activeTagName === 'INPUT' || activeTagName === 'TEXTAREA';
-        if (event.ctrlKey) {
-            if (event.key === 'c' || event.key === 'C') {
-                if (isInputFocused) return;
-                if (duplicateRectBtn.style.display !== 'none') duplicateRectBtn.click();
-                event.preventDefault();
-            } else if (event.key === 's' || event.key === 'S') {
-                saveBtn.click(); event.preventDefault();
-            } else if (event.key === 'r' || event.key === 'R') {
-                resetBtn.click(); event.preventDefault();
-            } else if (event.key === 'd' || event.key === 'D') {
-                if (isInputFocused) return;
-                if (deleteRectBtn.style.display !== 'none') deleteRectBtn.click();
-                event.preventDefault();
-            }
-        } else {
-            if (event.key === 'Delete') {
-                if (isInputFocused) return;
-                if (deleteRectBtn.style.display !== 'none') deleteRectBtn.click();
-                event.preventDefault();
-            }
-        }
+    panModeBtn.addEventListener('click', () => {
+        interactionMode = 'pan';
+        panModeBtn.classList.add('mode-active');
+        selectModeBtn.classList.remove('mode-active');
+        canvas.style.cursor = 'grab';
+    });
+
+    fitBtn.addEventListener('click', () => {
+        if (baseRectangles.length === 0) return;
+        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+        baseRectangles.forEach(item => {
+            minX = Math.min(minX, item.x); minY = Math.min(minY, item.y);
+            maxX = Math.max(maxX, item.x + item.w); maxY = Math.max(maxY, item.y + item.h);
+        });
+        const contentW = maxX - minX; const contentH = maxY - minY;
+        const canvasW = canvas.clientWidth - 40; const canvasH = canvas.clientHeight - 40;
+        logicalZoom = Math.min(canvasW / contentW, canvasH / contentH, 1.0);
+        panX = (canvas.clientWidth - contentW * logicalZoom) / 2 - minX * logicalZoom;
+        panY = (canvas.clientHeight - contentH * logicalZoom) / 2 - minY * logicalZoom;
+        renderAllRectangles(); updateZoomDisplay();
     });
 
     groupBtn.addEventListener('click', () => {
@@ -835,14 +838,7 @@ document.addEventListener('DOMContentLoaded', () => {
             selectedInstances.forEach(instance => newGroup.addMember(instance));
             newGroup.calculateBoundingBox(); baseRectangles.push(newGroup);
             deselectAllRectanglesStyling(); selectedRectsDOM = [];
-            newGroup.createOrUpdateDomElement(canvas, logicalZoom);
-            if (newGroup.domElement) {
-                selectedRectsDOM.push(newGroup.domElement);
-                newGroup.domElement.classList.add('selected');
-                newGroup.domElement.addEventListener('mousedown', handleItemMouseDown);
-            }
-            primarySelectedBaseRect = newGroup;
-            updateInputFields(primarySelectedBaseRect); renderAllRectangles();
+            selectItem(newGroup);
         }
     });
 
@@ -861,10 +857,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (groupIndex > -1) baseRectangles.splice(groupIndex, 1);
             deselectAllRectanglesStyling(); selectedRectsDOM = [];
             membersToRelease.forEach(member => {
-                if (member.domElement) {
-                    selectedRectsDOM.push(member.domElement);
-                    member.domElement.classList.add('selected');
-                }
+                if (member.domElement) { selectedRectsDOM.push(member.domElement); member.domElement.classList.add('selected'); }
             });
             primarySelectedBaseRect = membersToRelease.length > 0 ? membersToRelease[0] : null;
             updateInputFields(primarySelectedBaseRect); renderAllRectangles();
@@ -872,6 +865,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     function exportToSVG() {
+        if (baseRectangles.length === 0) { alert("Nincs mit exportálni!"); return; }
         let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
         baseRectangles.forEach(item => {
             if (item.type === 'rectangle') {
@@ -879,29 +873,21 @@ document.addEventListener('DOMContentLoaded', () => {
                 maxX = Math.max(maxX, item.x + item.w); maxY = Math.max(maxY, item.y + item.h);
             }
         });
-        if (baseRectangles.length === 0) { alert("Nincs mit exportálni!"); return; }
-
         const padding = 20;
         const width = maxX - minX + padding * 2;
         const height = maxY - minY + padding * 2;
         const offsetX = -minX + padding;
         const offsetY = -minY + padding;
 
-        let svgContent = `<?xml version="1.0" encoding="UTF-8" standalone="no"?>
-<svg width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" xmlns="http://www.w3.org/2000/svg">
-`;
+        let svgContent = `<?xml version="1.0" encoding="UTF-8" standalone="no"?>\n<svg width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" xmlns="http://www.w3.org/2000/svg">\n`;
         baseRectangles.filter(item => item.type === 'rectangle').sort((a,b) => a.zIndex - b.zIndex).forEach(rect => {
             svgContent += `  <rect x="${rect.x + offsetX}" y="${rect.y + offsetY}" width="${rect.w}" height="${rect.h}" fill="rgba(200, 200, 200, 0.6)" stroke="black" stroke-width="1" />\n`;
         });
         svgContent += '</svg>';
-
         const blob = new Blob([svgContent], {type: 'image/svg+xml'});
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url; a.download = 'export.svg';
-        document.body.appendChild(a); a.click();
+        const url = URL.createObjectURL(blob); const a = document.createElement('a');
+        a.href = url; a.download = 'export.svg'; document.body.appendChild(a); a.click();
         document.body.removeChild(a); URL.revokeObjectURL(url);
     }
-
     exportSvgBtn.addEventListener('click', exportToSVG);
 });
