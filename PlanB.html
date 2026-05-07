@@ -9,76 +9,77 @@
             height: 100%;
             margin: 0;
             padding: 0;
-            overflow: hidden; /* Body-n is, hogy ne legyen scrollbar */
+            overflow: hidden;
             display: flex;
             flex-direction: column;
         }
         #canvas {
-            /* width: 800px; */ /* Eltávolítva vagy kommentelve */
-            /* height: 600px; */ /* Eltávolítva vagy kommentelve */
-            width: 100%; /* Szélesség 100% */
-            flex-grow: 1; /* Kitölti a maradék magasságot */
+            width: 100%;
+            flex-grow: 1;
             border: 1px solid black;
             position: relative;
-            overflow: hidden; /* Hogy a téglalapok ne lógjanak ki */
-            /* transform-origin: 0 0; */ /* Eltávolítva */
-            /* transition: transform 0.1s ease-out; */ /* Eltávolítva */
-            /* margin-top: 10px; */ /* Flexbox miatt már nem feltétlenül szükséges, vagy másképp kezelendő */
+            overflow: hidden;
             background-image:
                 linear-gradient(rgba(0,0,0,0.1) 1px, transparent 1px),
                 linear-gradient(90deg, rgba(0,0,0,0.1) 1px, transparent 1px);
             background-size: 10px 10px;
         }
+        #viewport {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            transform-origin: 0 0;
+        }
         .rectangle {
             position: absolute;
-            background-color: rgba(200, 200, 200, 0.6); /* Alpha növelve 0.6-re */
-            border: 1px solid black; /* Visszaállítva fix 1px-re */
+            background-color: rgba(200, 200, 200, 0.6);
+            border: 1px solid black;
             cursor: pointer;
-            /* z-index a JS-ből jön majd, de az alapértelmezett itt nem árt, bár felülíródik */
         }
         .selected {
             box-shadow: 0 0 10px 3px gold;
         }
         .controls {
-            /* margin-top: 10px; */ /* Flexbox miatt már nem feltétlenül szükséges */
             padding: 10px;
-            border-bottom: 1px solid #ccc; /* Alulra egy elválasztó vonal */
-            width: 100%; /* Kitölti a rendelkezésre álló szélességet */
-            box-sizing: border-box; /* Hogy a padding ne adjon hozzá a szélességhez */
-            flex-shrink: 0; /* Hogy ne zsugorodjon */
+            border-bottom: 1px solid #ccc;
+            width: 100%;
+            box-sizing: border-box;
+            flex-shrink: 0;
         }
         .controls label {
             display: inline-block;
             width: 80px;
             margin-bottom: 5px;
         }
-        .controls input[type="number"] {
-            width: 60px;
+        .controls input[type="text"] {
+            width: 80px;
             margin-bottom: 5px;
         }
         .controls button {
-            margin-top: 10px;
+            margin-top: 5px;
             padding: 5px 10px;
         }
         .anchor-controls-container {
-            display: flex; /* Elemek egy sorba rendezése */
-            align-items: center; /* Vertikális középre igazítás */
+            display: flex;
+            align-items: center;
         }
         .anchor-grid {
             display: grid;
-            grid-template-columns: repeat(3, 20px); /* 3 oszlop, mind 20px széles */
-            grid-template-rows: repeat(3, 20px);    /* 3 sor, mind 20px magas */
-            gap: 2px; /* Kis rés a gombok között */
+            grid-template-columns: repeat(3, 20px);
+            grid-template-rows: repeat(3, 20px);
+            gap: 2px;
         }
         .anchor-grid input[type="radio"] {
-            appearance: none; /* Böngésző alapértelmezett stílusának eltávolítása */
+            appearance: none;
             -webkit-appearance: none;
             -moz-appearance: none;
             width: 100%;
             height: 100%;
             margin: 0;
             border: 1px solid #aaa;
-            border-radius: 3px; /* Lekerekített sarkok */
+            border-radius: 3px;
             outline: none;
             cursor: pointer;
             display: flex;
@@ -93,45 +94,68 @@
             border-color: #777;
         }
         .group-boundary {
-            background-color: rgba(0,0,0,0.0) !important; /* Ensure transparent background */
-            /* border: 1px dashed #888; */ /* Default border, JS can override or set to transparent if only glow needed */
-            /* pointer-events: none; */ /* If clicks should pass through to members. For selection, this should be auto or initial. */
+            background-color: rgba(0,0,0,0.0) !important;
+        }
+        #anchor-viz {
+            position: absolute;
+            width: 8px;
+            height: 8px;
+            background-color: magenta;
+            border-radius: 50%;
+            pointer-events: none;
+            z-index: 10000;
+            display: none;
+            transform: translate(-50%, -50%);
+            border: 1px solid white;
+        }
+        .mode-active {
+            background-color: #ddd;
+            font-weight: bold;
         }
     </style>
 </head>
 <body>
 
     <div class="controls">
-        <div>
-            <label for="rect-x">X:</label>
-            <input type="number" id="rect-x">
+        <div style="display: flex; flex-wrap: wrap; gap: 10px; align-items: center;">
+            <div>
+                <label for="rect-x">X:</label>
+                <input type="text" id="rect-x">
+            </div>
+            <div>
+                <label for="rect-y">Y:</label>
+                <input type="text" id="rect-y">
+            </div>
+            <div>
+                <label for="rect-width">Szélesség:</label>
+                <input type="text" id="rect-width">
+            </div>
+            <div>
+                <label for="rect-height">Magasság:</label>
+                <input type="text" id="rect-height">
+            </div>
         </div>
-        <div>
-            <label for="rect-y">Y:</label>
-            <input type="number" id="rect-y">
+
+        <div style="margin-top: 5px;">
+            <button id="add-rect-btn">+</button>
+            <button id="delete-rect-btn" style="display: none; margin-left: 10px;">Kijelölt törlése</button>
+            <button id="duplicate-rect-btn" style="display: none; margin-left: 5px;">Másolás</button>
+            <button id="group-btn" style="display: none; margin-left: 5px;">Group</button>
+            <button id="ungroup-btn" style="display: none; margin-left: 5px;">Ungroup</button>
+            <button id="rotate-cw-btn" style="display: none; margin-left: 5px;">↻</button>
+            <button id="rotate-ccw-btn" style="display: none; margin-left: 5px;">↺</button>
+            <button id="save-btn" style="margin-left: 20px;">Mentés</button>
+            <button id="load-btn">Betöltés</button>
+            <button id="export-svg-btn">SVG Export</button>
+            <button id="reset-btn">Alaphelyzet</button>
         </div>
-        <div>
-            <label for="rect-width">Szélesség:</label>
-            <input type="number" id="rect-width">
-        </div>
-        <div>
-            <label for="rect-height">Magasság:</label>
-            <input type="number" id="rect-height">
-        </div>
-        <button id="add-rect-btn">+</button>
-        <button id="delete-rect-btn" style="display: none; margin-left: 10px;">Kijelölt törlése</button>
-        <button id="duplicate-rect-btn" style="display: none; margin-left: 5px;">Másolás</button>
-        <button id="group-btn" style="display: none; margin-left: 5px;">Group</button>
-        <button id="ungroup-btn" style="display: none; margin-left: 5px;">Ungroup</button>
-        <button id="rotate-cw-btn" style="display: none; margin-left: 5px;">↻</button>
-        <button id="rotate-ccw-btn" style="display: none; margin-left: 5px;">↺</button>
-        <button id="save-btn" style="margin-left: 20px;">Mentés</button>
-        <button id="load-btn">Betöltés</button>
-        <button id="reset-btn">Alaphelyzet</button>
-        
-        <div style="display: inline-flex; align-items: baseline; margin-top: 10px; vertical-align: middle;">
-            <button id="reset-zoom-btn" style="margin-left: 10px;">Zoom Reset</button>
-            
+
+        <div style="display: inline-flex; align-items: center; margin-top: 10px; vertical-align: middle; gap: 5px;">
+            <button id="select-mode-btn" class="mode-active">Kijelölés</button>
+            <button id="pan-mode-btn">Drag</button>
+            <button id="fit-btn" style="margin-left: 10px;">Fit</button>
+            <button id="reset-zoom-btn">Zoom Reset</button>
+
             <div class="anchor-controls-container" style="padding: 5px; border: 1px solid #ddd; margin-left: 10px; margin-right: 10px;">
                 <span style="margin-right: 5px; font-size: 0.9em;">Megfogási pont:</span>
                 <div class="anchor-grid">
@@ -146,14 +170,19 @@
                     <input type="radio" name="anchor-point" id="anchor-br" value="bottom-right">
                 </div>
             </div>
-            <span style="/* margin-left: 10px; was here, now handled by anchor-controls right margin */">Zoom: <select id="zoom-level-select"></select></span>
-        </div>
 
-        <!-- The rest of the radio buttons that were previously inside the original anchor-controls-container are now correctly placed. -->
+            <span>Zoom:
+                <input type="text" id="zoom-input" style="width: 50px;" value="100%">
+                <select id="zoom-level-select" style="width: 20px; margin-left: -22px; vertical-align: middle;"></select>
+            </span>
+        </div>
     </div>
 
     <div id="canvas">
-        <!-- Ide kerülnek a téglalapok -->
+        <div id="viewport">
+            <!-- Ide kerülnek a téglalapok -->
+            <div id="anchor-viz"></div>
+        </div>
     </div>
 
     <script src="canvasObjects.js"></script>

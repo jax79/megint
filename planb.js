@@ -1,27 +1,6 @@
-// Full planb.js from current state,
-// with ONLY rotateCwBtn and rotateCcwBtn listeners modified.
-
 document.addEventListener('DOMContentLoaded', () => {
     const canvas = document.getElementById('canvas');
-    // ... (all other variable declarations and functions as they are in the current state of planb.js) ...
-    // ... (this includes the fully implemented swapSelectedRectangleDimensions) ...
-
-    // MODIFIED Button Listeners:
-    rotateCwBtn.addEventListener('click', () => swapSelectedRectangleDimensions('cw')); 
-    rotateCcwBtn.addEventListener('click', () => swapSelectedRectangleDimensions('ccw')); 
-
-    // ... (Rest of the planb.js file as it was) ...
-}); // End of DOMContentLoaded
-
-
-// --- PASTE THE FULL CONTENT of planb.js (user base + duplicateItemRecursive + updated duplicateBtn listener + full swapSelectedRectangleDimensions) here, ---
-// --- replacing ONLY the rotateCwBtn and rotateCcwBtn listeners with the ones above. ---
-// --- For brevity, I'm not pasting the entire 1000+ lines again. ---
-// --- The following is the exact content from the previous `overwrite_file_with_block` ---
-// --- (which was user's "good" version + duplicate functions + group button visibility fix + full swapSelectedRectangleDimensions for group rotation) ---
-// --- with just its rotate button listeners modified. ---
-document.addEventListener('DOMContentLoaded', () => {
-    const canvas = document.getElementById('canvas');
+    const viewport = document.getElementById('viewport');
     const rectXInput = document.getElementById('rect-x');
     const rectYInput = document.getElementById('rect-y');
     const rectWidthInput = document.getElementById('rect-width');
@@ -31,41 +10,54 @@ document.addEventListener('DOMContentLoaded', () => {
     const saveBtn = document.getElementById('save-btn');
     const loadBtn = document.getElementById('load-btn');
     const resetBtn = document.getElementById('reset-btn');
-    const duplicateRectBtn = document.getElementById('duplicate-rect-btn'); 
-    const rotateCwBtn = document.getElementById('rotate-cw-btn'); // Ref kept
-    const rotateCcwBtn = document.getElementById('rotate-ccw-btn'); // Ref kept
+    const duplicateRectBtn = document.getElementById('duplicate-rect-btn');
+    const rotateCwBtn = document.getElementById('rotate-cw-btn');
+    const rotateCcwBtn = document.getElementById('rotate-ccw-btn');
     const resetZoomBtn = document.getElementById('reset-zoom-btn');
     const zoomLevelSelect = document.getElementById('zoom-level-select');
+    const zoomInput = document.getElementById('zoom-input');
     const groupBtn = document.getElementById('group-btn');
     const ungroupBtn = document.getElementById('ungroup-btn');
+    const exportSvgBtn = document.getElementById('export-svg-btn');
+    const anchorViz = document.getElementById('anchor-viz');
+    const selectModeBtn = document.getElementById('select-mode-btn');
+    const panModeBtn = document.getElementById('pan-mode-btn');
+    const fitBtn = document.getElementById('fit-btn');
 
-    let selectedRectsDOM = []; 
-    let primarySelectedBaseRect = null; 
-    let rectCounter = 0; 
-    let groupCounter = 0; 
+    let selectedRectsDOM = [];
+    let primarySelectedBaseRect = null;
+    let rectCounter = 0;
+    let groupCounter = 0;
 
     let isDragging = false;
-    let dragOffsets_base = []; 
+    let isPanning = false;
+    let interactionMode = 'select'; // 'select' or 'pan'
+
+    let dragOffsets_base = [];
     let justDragged = false;
     let currentHighestZIndex = 1;
 
     let logicalZoom = 1.0;
+    let panX = 0;
+    let panY = 0;
+
     const ZOOM_SPEED = 0.05;
-    const MIN_ZOOM = 0.2;
-    const MAX_ZOOM = 3.0;
+    const MIN_ZOOM = 0.05;
+    const MAX_ZOOM = 10.0;
 
     let baseRectangles = [];
-    let draggedItems = []; 
+    let draggedItems = [];
 
     let currentAnchorPoint = 'middle-center';
 
     function updateInputFields(baseRectForInputs) {
-        if (baseRectForInputs) { 
+        if (baseRectForInputs) {
             const anchorOffset = getAnchorOffsetInBaseCoords(baseRectForInputs, currentAnchorPoint);
             rectXInput.value = (baseRectForInputs.x + anchorOffset.x).toFixed(0);
             rectYInput.value = (baseRectForInputs.y + anchorOffset.y).toFixed(0);
             rectWidthInput.value = baseRectForInputs.w.toFixed(0);
             rectHeightInput.value = baseRectForInputs.h.toFixed(0);
+            updateAnchorViz(baseRectForInputs);
 
             rectXInput.disabled = false;
             rectYInput.disabled = false;
@@ -76,7 +68,7 @@ document.addEventListener('DOMContentLoaded', () => {
             rotateCwBtn.style.display = 'inline-block';
             rotateCcwBtn.style.display = 'inline-block';
 
-            if (selectedRectsDOM.length > 1 ) { 
+            if (selectedRectsDOM.length > 1 ) {
                 groupBtn.style.display = 'inline-block';
                 groupBtn.disabled = false;
             } else {
@@ -98,39 +90,81 @@ document.addEventListener('DOMContentLoaded', () => {
             rotateCwBtn.style.display = 'none'; rotateCcwBtn.style.display = 'none';
             groupBtn.style.display = 'none'; groupBtn.disabled = true;
             ungroupBtn.style.display = 'none'; ungroupBtn.disabled = true;
+            anchorViz.style.display = 'none';
+        }
+    }
+
+    function updateAnchorViz(item) {
+        if (!item) {
+            anchorViz.style.display = 'none';
+            return;
+        }
+        const anchorOffset = getAnchorOffsetInBaseCoords(item, currentAnchorPoint);
+        anchorViz.style.left = (item.x + anchorOffset.x) + 'px';
+        anchorViz.style.top = (item.y + anchorOffset.y) + 'px';
+        anchorViz.style.display = 'block';
+    }
+
+    function evaluateExpression(str) {
+        try {
+            if (/[^-+*/().\d\s]/.test(str)) return NaN;
+            return new Function(`return (${str})`)();
+        } catch (e) {
+            return NaN;
         }
     }
 
     function clearCanvas() {
         baseRectangles.forEach(item => {
-            if (item.type === 'group' && item.domElement) item.removeDomElement(); 
+            if (item.type === 'group' && item.domElement) item.removeDomElement();
         });
-        const allRects = canvas.querySelectorAll('.rectangle'); 
+        const allRects = viewport.querySelectorAll('.rectangle');
         allRects.forEach(rect => rect.remove());
         selectedRectsDOM = []; primarySelectedBaseRect = null;
-        updateInputFields(null); 
-        rectCounter = 0; groupCounter = 0; baseRectangles = []; currentHighestZIndex = 1; 
-        logicalZoom = 1.0; canvas.style.backgroundSize = `${10 * logicalZoom}px ${10 * logicalZoom}px`;
-        updateZoomDisplay(); renderAllRectangles(); 
+        updateInputFields(null);
+        rectCounter = 0; groupCounter = 0; baseRectangles = []; currentHighestZIndex = 1;
+        logicalZoom = 1.0; panX = 0; panY = 0;
+        updateZoomDisplay(); renderAllRectangles();
     }
 
     function renderAllRectangles() {
+        viewport.style.transform = `translate(${panX}px, ${panY}px) scale(${logicalZoom})`;
+        canvas.style.backgroundSize = `${10 * logicalZoom}px ${10 * logicalZoom}px`;
+        canvas.style.backgroundPosition = `${panX}px ${panY}px`;
+
         baseRectangles.forEach(item => {
             if (item.type === 'rectangle') {
-                if (item.domElement) { 
-                    item.domElement.style.left = (item.x * logicalZoom) + 'px';
-                    item.domElement.style.top = (item.y * logicalZoom) + 'px';
-                    item.domElement.style.width = (item.w * logicalZoom) + 'px';
-                    item.domElement.style.height = (item.h * logicalZoom) + 'px';
+                if (item.domElement) {
+                    item.domElement.style.left = item.x + 'px';
+                    item.domElement.style.top = item.y + 'px';
+                    item.domElement.style.width = item.w + 'px';
+                    item.domElement.style.height = item.h + 'px';
                     item.domElement.style.zIndex = item.zIndex;
                 }
             } else if (item.type === 'group') {
-                item.createOrUpdateDomElement(canvas, logicalZoom); 
+                // Modified createOrUpdateDomElement logic for no-zoom positioning
+                if (!item.domElement) {
+                    item.domElement = document.createElement('div');
+                    item.domElement.id = `group-dom-${item.id}`;
+                    item.domElement.classList.add('rectangle');
+                    item.domElement.classList.add('group-boundary');
+                    viewport.appendChild(item.domElement);
+                }
+                item.domElement.style.left = item.x + 'px';
+                item.domElement.style.top = item.y + 'px';
+                item.domElement.style.width = item.w + 'px';
+                item.domElement.style.height = item.h + 'px';
+                item.domElement.style.zIndex = item.zIndex;
+                item.domElement.style.backgroundColor = 'rgba(0,0,0,0)';
+                item.domElement.style.border = '1px dashed #888';
             }
         });
+        if (primarySelectedBaseRect) updateAnchorViz(primarySelectedBaseRect);
     }
 
     function updateZoomDisplay() {
+        const zoomPercent = Math.round(logicalZoom * 100) + '%';
+        zoomInput.value = zoomPercent;
         if (zoomLevelSelect) {
             let foundMatch = false;
             for (let i = 0; i < zoomLevelSelect.options.length; i++) {
@@ -140,22 +174,23 @@ document.addEventListener('DOMContentLoaded', () => {
                     foundMatch = true; break;
                 }
             }
+            if (!foundMatch) zoomLevelSelect.value = "";
         }
     }
-    
+
     function getTopMostParent(item) {
         let current = item;
         while (current.parentId) {
             const parent = baseRectangles.find(br => br.id === current.parentId);
-            if (parent) current = parent; else break; 
+            if (parent) current = parent; else break;
         }
         return current;
     }
-    
+
     function updateAllBoundingBoxes(item) {
         if (item.type === 'group') {
             item.members.forEach(member => updateAllBoundingBoxes(member));
-            item.calculateBoundingBox(); 
+            item.calculateBoundingBox();
         }
     }
 
@@ -167,9 +202,10 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function handleItemMouseDown(event) {
+        if (interactionMode !== 'select') return;
         event.preventDefault(); event.stopPropagation();
-        const clickedDomId = this.id; 
-        let clickedItemInstance = baseRectangles.find(br => br.id === clickedDomId); 
+        const clickedDomId = this.id;
+        let clickedItemInstance = baseRectangles.find(br => br.id === clickedDomId);
         if (!clickedItemInstance && clickedDomId.startsWith('group-dom-')) {
             const groupId = clickedDomId.replace('group-dom-', '');
             clickedItemInstance = baseRectangles.find(br => br.id === groupId && br.type === 'group');
@@ -198,15 +234,15 @@ document.addEventListener('DOMContentLoaded', () => {
                 } else {
                     primarySelectedBaseRect = objectToSelect; currentHighestZIndex++; objectToSelect.zIndex = currentHighestZIndex;
                 }
-            } else if (objectToSelect.type === 'group') { 
+            } else if (objectToSelect.type === 'group') {
                 deselectAllRectanglesStyling(); selectedRectsDOM = [];
                 primarySelectedBaseRect = objectToSelect; currentHighestZIndex++; objectToSelect.zIndex = currentHighestZIndex;
             }
         }
         updateInputFields(primarySelectedBaseRect); renderAllRectangles();
-        isDragging = true; draggedItems = []; dragOffsets_base = []; 
-        const mousePosOnCanvas = getMousePositionOnCanvas(event);
-        const mouseBasePos = { x: mousePosOnCanvas.x / logicalZoom, y: mousePosOnCanvas.y / logicalZoom };
+        isDragging = true; draggedItems = []; dragOffsets_base = [];
+        const mouseBasePos = getMouseBasePosition(event);
+
         if (primarySelectedBaseRect && primarySelectedBaseRect.domElement && selectedRectsDOM.includes(primarySelectedBaseRect.domElement)) {
             draggedItems = [primarySelectedBaseRect];
             if (selectedRectsDOM.length > 1) {
@@ -225,20 +261,12 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         if (draggedItems.length > 0) {
-            if (draggedItems.length === 1 && draggedItems[0].type === 'group') {
-                const group = draggedItems[0];
-                dragOffsets_base.push({ id: group.id, type: 'group', offsetX: mouseBasePos.x - group.x, offsetY: mouseBasePos.y - group.y });
-                currentHighestZIndex++; group.zIndex = currentHighestZIndex;
-            } else {
-                draggedItems.forEach(item => {
-                    const itemAnchorOffset = (item.type === 'group') ? {x:0,y:0} : getAnchorOffsetInBaseCoords(item, currentAnchorPoint);
-                    dragOffsets_base.push({ id: item.id, type: item.type, offsetX: mouseBasePos.x - (item.x + itemAnchorOffset.x), offsetY: mouseBasePos.y - (item.y + itemAnchorOffset.y) });
-                });
-                if (draggedItems.length > 0) {
-                    draggedItems.sort((a, b) => a.zIndex - b.zIndex);
-                    draggedItems.forEach(item => { currentHighestZIndex++; item.zIndex = currentHighestZIndex; });
-                }
-            }
+            draggedItems.forEach(item => {
+                const itemAnchorOffset = (item.type === 'group') ? {x:0,y:0} : getAnchorOffsetInBaseCoords(item, currentAnchorPoint);
+                dragOffsets_base.push({ id: item.id, type: item.type, offsetX: mouseBasePos.x - (item.x + itemAnchorOffset.x), offsetY: mouseBasePos.y - (item.y + itemAnchorOffset.y) });
+            });
+            draggedItems.sort((a, b) => a.zIndex - b.zIndex);
+            draggedItems.forEach(item => { currentHighestZIndex++; item.zIndex = currentHighestZIndex; });
             renderAllRectangles();
         }
     }
@@ -255,101 +283,96 @@ document.addEventListener('DOMContentLoaded', () => {
         return { x: offsetX, y: offsetY };
     }
 
-    function getMousePositionOnCanvas(event) {
+    function getMouseBasePosition(event) {
         const canvasRect = canvas.getBoundingClientRect();
-        return { x: event.clientX - canvasRect.left, y: event.clientY - canvasRect.top };
+        return {
+            x: (event.clientX - canvasRect.left - panX) / logicalZoom,
+            y: (event.clientY - canvasRect.top - panY) / logicalZoom
+        };
     }
 
-    function swapSelectedRectangleDimensions(direction = 'cw') { 
-        let isSingleGroupRotation = false;
+    function swapSelectedRectangleDimensions(direction = 'cw') {
         let groupToRotate = null;
-        let dimensionsChangedForPrimaryOrGroup = false;
+        let itemsToProcess = [];
 
-        if (primarySelectedBaseRect && 
+        if (primarySelectedBaseRect &&
             primarySelectedBaseRect.type === 'group' &&
-            selectedRectsDOM.length === 1 && 
+            selectedRectsDOM.length === 1 &&
             selectedRectsDOM[0] === primarySelectedBaseRect.domElement) {
-            isSingleGroupRotation = true;
             groupToRotate = primarySelectedBaseRect;
+        } else {
+            selectedRectsDOM.forEach(domEl => {
+                const instance = baseRectangles.find(br => br.domElement === domEl);
+                if (instance) itemsToProcess.push(instance);
+            });
+            if (itemsToProcess.length === 0 && primarySelectedBaseRect) {
+                itemsToProcess.push(primarySelectedBaseRect);
+            }
         }
 
-        if (isSingleGroupRotation && groupToRotate) {
-            const groupAnchorOffset = getAnchorOffsetInBaseCoords(groupToRotate, currentAnchorPoint);
-            const anchorGX = groupToRotate.x + groupAnchorOffset.x;
-            const anchorGY = groupToRotate.y + groupAnchorOffset.y;
-
-            const leafMembers = [];
-            getAllLeafMembers(groupToRotate, leafMembers); 
-            
-            if (leafMembers.length > 0) {
-                leafMembers.forEach(memberRect => {
-                    if (memberRect.type === 'rectangle') { 
-                        const memberCenterX = memberRect.x + memberRect.w / 2;
-                        const memberCenterY = memberRect.y + memberRect.h / 2;
-
-                        const translatedX = memberCenterX - anchorGX;
-                        const translatedY = memberCenterY - anchorGY;
-
-                        let rotatedX, rotatedY;
-                        if (direction === 'cw') {
-                            rotatedX = translatedY;
-                            rotatedY = -translatedX;
-                        } else { // ccw
-                            rotatedX = -translatedY;
-                            rotatedY = translatedX;
-                        }
-
-                        const newGlobalMemberCenterX = anchorGX + rotatedX;
-                        const newGlobalMemberCenterY = anchorGY + rotatedY;
-
-                        const newMemberW = memberRect.h; 
-                        const newMemberH = memberRect.w;
-
-                        memberRect.w = newMemberW;
-                        memberRect.h = newMemberH;
-                        memberRect.x = newGlobalMemberCenterX - newMemberW / 2;
-                        memberRect.y = newGlobalMemberCenterY - newMemberH / 2;
-                    }
+        if (groupToRotate || itemsToProcess.length > 0) {
+            let anchorGX, anchorGY;
+            if (groupToRotate) {
+                const groupAnchorOffset = getAnchorOffsetInBaseCoords(groupToRotate, currentAnchorPoint);
+                anchorGX = groupToRotate.x + groupAnchorOffset.x;
+                anchorGY = groupToRotate.y + groupAnchorOffset.y;
+                const leafMembers = [];
+                getAllLeafMembers(groupToRotate, leafMembers);
+                itemsToProcess = leafMembers;
+            } else {
+                let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+                itemsToProcess.forEach(it => {
+                    minX = Math.min(minX, it.x); minY = Math.min(minY, it.y);
+                    maxX = Math.max(maxX, it.x + it.w); maxY = Math.max(maxY, it.y + it.h);
                 });
-                updateAllBoundingBoxes(groupToRotate); 
-                dimensionsChangedForPrimaryOrGroup = true;
-            }
-        } else { 
-            let itemsToProcessIndividually = [];
-            selectedRectsDOM.forEach(domEl => {
-                const instance = baseRectangles.find(br => br.domElement === domEl && br.type === 'rectangle');
-                if (instance) itemsToProcessIndividually.push(instance);
-            });
-            
-            if (itemsToProcessIndividually.length === 0 && 
-                primarySelectedBaseRect && primarySelectedBaseRect.type === 'rectangle' && 
-                selectedRectsDOM.length === 1 && selectedRectsDOM[0] === primarySelectedBaseRect.domElement){
-                 itemsToProcessIndividually.push(primarySelectedBaseRect);
+                const tempRect = { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
+                const anchorOffset = getAnchorOffsetInBaseCoords(tempRect, currentAnchorPoint);
+                anchorGX = tempRect.x + anchorOffset.x;
+                anchorGY = tempRect.y + anchorOffset.y;
+
+                const allLeafs = [];
+                itemsToProcess.forEach(it => {
+                    if (it.type === 'rectangle') allLeafs.push(it);
+                    else if (it.type === 'group') getAllLeafMembers(it, allLeafs);
+                });
+                itemsToProcess = allLeafs;
             }
 
-            itemsToProcessIndividually.forEach(baseRectToSwap => {
-                const oldW = baseRectToSwap.w; const oldH = baseRectToSwap.h;
-                baseRectToSwap.w = oldH; baseRectToSwap.h = oldW;
-                const dw = baseRectToSwap.w - oldW; const dh = baseRectToSwap.h - oldH; 
-                const ap = currentAnchorPoint; 
-                if (ap.includes('center') && !ap.includes('left') && !ap.includes('right')) baseRectToSwap.x -= dw / 2;
-                else if (ap.includes('right')) baseRectToSwap.x -= dw;
-                if (ap.includes('middle') && !ap.includes('top') && !ap.includes('bottom')) baseRectToSwap.y -= dh / 2;
-                else if (ap.includes('bottom')) baseRectToSwap.y -= dh;
-                if (primarySelectedBaseRect && primarySelectedBaseRect.id === baseRectToSwap.id) {
-                    dimensionsChangedForPrimaryOrGroup = true; 
+            itemsToProcess.forEach(memberRect => {
+                const memberCenterX = memberRect.x + memberRect.w / 2;
+                const memberCenterY = memberRect.y + memberRect.h / 2;
+                const translatedX = memberCenterX - anchorGX;
+                const translatedY = memberCenterY - anchorGY;
+
+                let rotatedX, rotatedY;
+                if (direction === 'cw') {
+                    // Clockwise rotation (90 deg): (x, y) -> (-y, x)
+                    rotatedX = -translatedY;
+                    rotatedY = translatedX;
+                } else { // ccw
+                    // Counter-clockwise rotation (90 deg): (x, y) -> (y, -x)
+                    rotatedX = translatedY;
+                    rotatedY = -translatedX;
                 }
+
+                const newGlobalMemberCenterX = anchorGX + rotatedX;
+                const newGlobalMemberCenterY = anchorGY + rotatedY;
+                const newMemberW = memberRect.h;
+                const newMemberH = memberRect.w;
+
+                memberRect.w = newMemberW;
+                memberRect.h = newMemberH;
+                memberRect.x = newGlobalMemberCenterX - newMemberW / 2;
+                memberRect.y = newGlobalMemberCenterY - newMemberH / 2;
+            });
+
+            baseRectangles.forEach(br => {
+                if (br.type === 'group' && br.parentId === null) updateAllBoundingBoxes(br);
             });
         }
 
         renderAllRectangles();
-        if (dimensionsChangedForPrimaryOrGroup && primarySelectedBaseRect) { 
-            updateInputFields(primarySelectedBaseRect); 
-        } else if (primarySelectedBaseRect) { 
-             updateInputFields(primarySelectedBaseRect);
-        } else { 
-             updateInputFields(null);
-        }
+        if (primarySelectedBaseRect) updateInputFields(primarySelectedBaseRect);
     }
 
     function deselectAllRectanglesStyling() { selectedRectsDOM.forEach(domEl => domEl.classList.remove('selected')); }
@@ -365,20 +388,24 @@ document.addEventListener('DOMContentLoaded', () => {
         primarySelectedBaseRect = null; updateInputFields(null);
     }
 
-    function selectRectangle(domElementToSelect) {
-        const baseRectToSelect = baseRectangles.find(br => br.domElement === domElementToSelect);
-        if (!baseRectToSelect) { console.warn("selectRectangle: baseRect not found for domEl", domElementToSelect); return; }
-        const topLevelSelectable = getTopMostParent(baseRectToSelect);
-        if (topLevelSelectable.domElement) {
+    function selectItem(item) {
+        if (!item) return;
+        const topLevelSelectable = getTopMostParent(item);
+        if (topLevelSelectable.type === 'rectangle') {
              clearAndSetPrimarySelection(topLevelSelectable, topLevelSelectable.domElement);
         } else if (topLevelSelectable.type === 'group') {
             deselectAllRectanglesStyling(); selectedRectsDOM = [];
             primarySelectedBaseRect = topLevelSelectable; currentHighestZIndex++; topLevelSelectable.zIndex = currentHighestZIndex;
-            if (!topLevelSelectable.domElement) topLevelSelectable.createOrUpdateDomElement(canvas, logicalZoom);
-            if (topLevelSelectable.domElement) {
-                 selectedRectsDOM.push(topLevelSelectable.domElement);
-                 topLevelSelectable.domElement.classList.add('selected');
+            if (!topLevelSelectable.domElement) {
+                topLevelSelectable.domElement = document.createElement('div');
+                topLevelSelectable.domElement.id = `group-dom-${topLevelSelectable.id}`;
+                topLevelSelectable.domElement.classList.add('rectangle');
+                topLevelSelectable.domElement.classList.add('group-boundary');
+                viewport.appendChild(topLevelSelectable.domElement);
+                topLevelSelectable.domElement.addEventListener('mousedown', handleItemMouseDown);
             }
+            selectedRectsDOM.push(topLevelSelectable.domElement);
+            topLevelSelectable.domElement.classList.add('selected');
         }
         updateInputFields(primarySelectedBaseRect); renderAllRectangles();
     }
@@ -389,40 +416,65 @@ document.addEventListener('DOMContentLoaded', () => {
         const newRectangleInstance = new CanvasRectangle(newRectId, baseX, baseY, baseW, baseH, 1, rectElement, null);
         baseRectangles.push(newRectangleInstance);
         rectElement.addEventListener('mousedown', handleItemMouseDown);
-        canvas.appendChild(rectElement); renderAllRectangles(); selectRectangle(rectElement);
+        viewport.appendChild(rectElement); renderAllRectangles(); selectItem(newRectangleInstance);
     }
 
-    document.addEventListener('mousemove', (event) => {
-        if (!isDragging || draggedItems.length === 0) return; 
-        const mousePosOnCanvas = getMousePositionOnCanvas(event);
-        const mouseBasePos = { x: mousePosOnCanvas.x / logicalZoom, y: mousePosOnCanvas.y / logicalZoom };
-        const singleDraggedItem = (draggedItems.length === 1) ? draggedItems[0] : null;
-        const groupOffsetInfo = (singleDraggedItem && singleDraggedItem.type === 'group') ? dragOffsets_base.find(offset => offset.id === singleDraggedItem.id && offset.type === 'group') : null;
-        if (groupOffsetInfo && singleDraggedItem) {
-            const draggedGroup = singleDraggedItem;
-            const newGroupX = mouseBasePos.x - groupOffsetInfo.offsetX;
-            const newGroupY = mouseBasePos.y - groupOffsetInfo.offsetY;
-            const deltaX = newGroupX - draggedGroup.x;
-            const deltaY = newGroupY - draggedGroup.y;
-            const leafMembers = []; getAllLeafMembers(draggedGroup, leafMembers);
-            leafMembers.forEach(member => { member.x += deltaX; member.y += deltaY; });
-            updateAllBoundingBoxes(draggedGroup);
-        } else {
-            draggedItems.forEach(item => {
-                const offsetInfo = dragOffsets_base.find(offset => offset.id === item.id);
-                if (offsetInfo) {
-                    const itemAnchorOffset = (item.type === 'group' || offsetInfo.type === 'group') ? {x:0,y:0} : getAnchorOffsetInBaseCoords(item, currentAnchorPoint);
-                    item.x = mouseBasePos.x - offsetInfo.offsetX - itemAnchorOffset.x;
-                    item.y = mouseBasePos.y - offsetInfo.offsetY - itemAnchorOffset.y;
-                    if(item.type === 'group') updateAllBoundingBoxes(item);
-                }
-            });
+    let lastMouseX, lastMouseY;
+
+    canvas.addEventListener('mousedown', (event) => {
+        if (interactionMode === 'pan' || event.button === 1) {
+            isPanning = true;
+            lastMouseX = event.clientX;
+            lastMouseY = event.clientY;
+            canvas.style.cursor = 'grabbing';
+            event.preventDefault();
         }
+    });
+
+    document.addEventListener('mousemove', (event) => {
+        if (isPanning) {
+            const dx = event.clientX - lastMouseX;
+            const dy = event.clientY - lastMouseY;
+            panX += dx;
+            panY += dy;
+            lastMouseX = event.clientX;
+            lastMouseY = event.clientY;
+            renderAllRectangles();
+            return;
+        }
+
+        if (!isDragging || draggedItems.length === 0) return;
+        const mouseBasePos = getMouseBasePosition(event);
+
+        draggedItems.forEach(item => {
+            const offsetInfo = dragOffsets_base.find(offset => offset.id === item.id);
+            if (offsetInfo) {
+                const itemAnchorOffset = (item.type === 'group') ? {x:0,y:0} : getAnchorOffsetInBaseCoords(item, currentAnchorPoint);
+                const oldX = item.x;
+                const oldY = item.y;
+                item.x = mouseBasePos.x - offsetInfo.offsetX - itemAnchorOffset.x;
+                item.y = mouseBasePos.y - offsetInfo.offsetY - itemAnchorOffset.y;
+
+                if (item.type === 'group') {
+                    const deltaX = item.x - oldX;
+                    const deltaY = item.y - oldY;
+                    const leafMembers = [];
+                    getAllLeafMembers(item, leafMembers);
+                    leafMembers.forEach(m => { m.x += deltaX; m.y += deltaY; });
+                    updateAllBoundingBoxes(item);
+                }
+            }
+        });
+
         renderAllRectangles();
         if (primarySelectedBaseRect) updateInputFields(primarySelectedBaseRect);
     });
 
     document.addEventListener('mouseup', (event) => {
+        if (isPanning) {
+            isPanning = false;
+            canvas.style.cursor = interactionMode === 'pan' ? 'grab' : 'default';
+        }
         if (isDragging) {
             draggedItems.forEach(item => { if (item.type === 'group') updateAllBoundingBoxes(item); });
             if (primarySelectedBaseRect) updateInputFields(primarySelectedBaseRect);
@@ -441,98 +493,105 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     canvas.addEventListener('click', (event) => {
-        if (justDragged) { justDragged = false; return; }
-        const canvasRect = canvas.getBoundingClientRect();
-        const clickX = (event.clientX - canvasRect.left); const clickY = (event.clientY - canvasRect.top);
+        if (justDragged || isPanning) { justDragged = false; return; }
+        if (interactionMode !== 'select') return;
+
+        // Find clicked item manually because viewport transformation might confuse simple DOM click
+        const mouseBasePos = getMouseBasePosition(event);
         let clickedOnAnyItem = false;
         for (let i = baseRectangles.length - 1; i >= 0; i--) {
             const item = baseRectangles[i];
-            if (item.domElement) {
-                 const itemLeftPx = parseFloat(item.domElement.style.left); const itemTopPx = parseFloat(item.domElement.style.top);
-                 const itemWidthPx = parseFloat(item.domElement.style.width); const itemHeightPx = parseFloat(item.domElement.style.height);
-                if (clickX >= itemLeftPx && clickX <= itemLeftPx + itemWidthPx && clickY >= itemTopPx && clickY <= itemTopPx + itemHeightPx) {
-                    clickedOnAnyItem = true; break;
-                }
+            if (mouseBasePos.x >= item.x && mouseBasePos.x <= item.x + item.w &&
+                mouseBasePos.y >= item.y && mouseBasePos.y <= item.y + item.h) {
+                clickedOnAnyItem = true; break;
             }
         }
         if (!clickedOnAnyItem) deselectAllRectangles();
     });
 
-    [rectXInput, rectYInput, rectWidthInput, rectHeightInput].forEach(input => {
-        input.addEventListener('input', () => {
-            if (primarySelectedBaseRect) {
-                const itemToUpdate = primarySelectedBaseRect; let value = parseFloat(input.value);
-                const oldProps = { x: itemToUpdate.x, y: itemToUpdate.y, w: itemToUpdate.w, h: itemToUpdate.h };
-                if (input === rectXInput && !isNaN(value)) {
-                    const newAnchorX = value; const anchorOffset = getAnchorOffsetInBaseCoords(itemToUpdate, currentAnchorPoint);
-                    itemToUpdate.x = newAnchorX - anchorOffset.x;
-                    if (itemToUpdate.type === 'group') {
-                        const deltaX = itemToUpdate.x - oldProps.x;
-                        const leafMembers = []; getAllLeafMembers(itemToUpdate, leafMembers);
-                        leafMembers.forEach(m => m.x += deltaX); updateAllBoundingBoxes(itemToUpdate);
-                    }
-                } else if (input === rectYInput && !isNaN(value)) {
-                    const newAnchorY = value; const anchorOffset = getAnchorOffsetInBaseCoords(itemToUpdate, currentAnchorPoint);
-                    itemToUpdate.y = newAnchorY - anchorOffset.y;
-                     if (itemToUpdate.type === 'group') {
-                        const deltaY = itemToUpdate.y - oldProps.y;
-                        const leafMembers = []; getAllLeafMembers(itemToUpdate, leafMembers);
-                        leafMembers.forEach(m => m.y += deltaY); updateAllBoundingBoxes(itemToUpdate);
-                    }
-                } else if (input === rectWidthInput && !isNaN(value)) {
-                    value = Math.max(0, value); input.value = value;
-                    if (itemToUpdate.type === 'rectangle') {
-                        const oldW = itemToUpdate.w; itemToUpdate.w = value; const dw = itemToUpdate.w - oldW;
-                        const ap = currentAnchorPoint;
-                        if (ap.includes('center') && !ap.includes('left') && !ap.includes('right')) itemToUpdate.x -= dw / 2;
-                        else if (ap.includes('right')) itemToUpdate.x -= dw;
-                    } else if (itemToUpdate.type === 'group') {
-                        const groupAnchorGlobalX = itemToUpdate.x + getAnchorOffsetInBaseCoords(itemToUpdate, currentAnchorPoint).x;
-                        const scaleFactor = value / oldProps.w;
-                        if (isFinite(scaleFactor) && scaleFactor > 0) {
-                             itemToUpdate.members.forEach(member => {
-                                member.x = groupAnchorGlobalX + (member.x - groupAnchorGlobalX) * scaleFactor;
-                                member.w *= scaleFactor; if(member.type === 'group') updateAllBoundingBoxes(member);
-                            });
-                            updateAllBoundingBoxes(itemToUpdate);
-                            const newAnchorOffsetX = getAnchorOffsetInBaseCoords(itemToUpdate, currentAnchorPoint).x;
-                            itemToUpdate.x = groupAnchorGlobalX - newAnchorOffsetX;
-                        }
-                    }
-                } else if (input === rectHeightInput && !isNaN(value)) {
-                    value = Math.max(0, value); input.value = value;
-                     if (itemToUpdate.type === 'rectangle') {
-                        const oldH = itemToUpdate.h; itemToUpdate.h = value; const dh = itemToUpdate.h - oldH;
-                        const ap = currentAnchorPoint;
-                        if (ap.includes('middle') && !ap.includes('top') && !ap.includes('bottom')) itemToUpdate.y -= dh / 2;
-                        else if (ap.includes('bottom')) itemToUpdate.y -= dh;
-                    } else if (itemToUpdate.type === 'group') {
-                         const groupAnchorGlobalY = itemToUpdate.y + getAnchorOffsetInBaseCoords(itemToUpdate, currentAnchorPoint).y;
-                         const scaleFactor = value / oldProps.h;
-                         if (isFinite(scaleFactor) && scaleFactor > 0) {
-                            itemToUpdate.members.forEach(member => {
-                                member.y = groupAnchorGlobalY + (member.y - groupAnchorGlobalY) * scaleFactor;
-                                member.h *= scaleFactor; if(member.type === 'group') updateAllBoundingBoxes(member);
-                            });
-                            updateAllBoundingBoxes(itemToUpdate);
-                            const newAnchorOffsetY = getAnchorOffsetInBaseCoords(itemToUpdate, currentAnchorPoint).y;
-                            itemToUpdate.y = groupAnchorGlobalY - newAnchorOffsetY;
-                         }
+    function handleInputChange(input) {
+        if (primarySelectedBaseRect) {
+            const itemToUpdate = primarySelectedBaseRect;
+            let value = evaluateExpression(input.value);
+            if (isNaN(value)) {
+                updateInputFields(primarySelectedBaseRect);
+                return;
+            }
+            const oldProps = { x: itemToUpdate.x, y: itemToUpdate.y, w: itemToUpdate.w, h: itemToUpdate.h };
+            if (input === rectXInput) {
+                const newAnchorX = value; const anchorOffset = getAnchorOffsetInBaseCoords(itemToUpdate, currentAnchorPoint);
+                itemToUpdate.x = newAnchorX - anchorOffset.x;
+                if (itemToUpdate.type === 'group') {
+                    const deltaX = itemToUpdate.x - oldProps.x;
+                    const leafMembers = []; getAllLeafMembers(itemToUpdate, leafMembers);
+                    leafMembers.forEach(m => m.x += deltaX); updateAllBoundingBoxes(itemToUpdate);
+                }
+            } else if (input === rectYInput) {
+                const newAnchorY = value; const anchorOffset = getAnchorOffsetInBaseCoords(itemToUpdate, currentAnchorPoint);
+                itemToUpdate.y = newAnchorY - anchorOffset.y;
+                if (itemToUpdate.type === 'group') {
+                    const deltaY = itemToUpdate.y - oldProps.y;
+                    const leafMembers = []; getAllLeafMembers(itemToUpdate, leafMembers);
+                    leafMembers.forEach(m => m.y += deltaY); updateAllBoundingBoxes(itemToUpdate);
+                }
+            } else if (input === rectWidthInput) {
+                value = Math.max(1, value);
+                if (itemToUpdate.type === 'rectangle') {
+                    const oldW = itemToUpdate.w; itemToUpdate.w = value; const dw = itemToUpdate.w - oldW;
+                    const ap = currentAnchorPoint;
+                    if (ap.includes('center') && !ap.includes('left') && !ap.includes('right')) itemToUpdate.x -= dw / 2;
+                    else if (ap.includes('right')) itemToUpdate.x -= dw;
+                } else if (itemToUpdate.type === 'group') {
+                    const groupAnchorGlobalX = itemToUpdate.x + getAnchorOffsetInBaseCoords(itemToUpdate, currentAnchorPoint).x;
+                    const scaleFactor = value / oldProps.w;
+                    if (isFinite(scaleFactor) && scaleFactor > 0) {
+                        itemToUpdate.members.forEach(member => {
+                            member.x = groupAnchorGlobalX + (member.x - groupAnchorGlobalX) * scaleFactor;
+                            member.w *= scaleFactor; if(member.type === 'group') updateAllBoundingBoxes(member);
+                        });
+                        updateAllBoundingBoxes(itemToUpdate);
+                        const newAnchorOffsetX = getAnchorOffsetInBaseCoords(itemToUpdate, currentAnchorPoint).x;
+                        itemToUpdate.x = groupAnchorGlobalX - newAnchorOffsetX;
                     }
                 }
-                renderAllRectangles(); updateInputFields(primarySelectedBaseRect);
+            } else if (input === rectHeightInput) {
+                value = Math.max(1, value);
+                if (itemToUpdate.type === 'rectangle') {
+                    const oldH = itemToUpdate.h; itemToUpdate.h = value; const dh = itemToUpdate.h - oldH;
+                    const ap = currentAnchorPoint;
+                    if (ap.includes('middle') && !ap.includes('top') && !ap.includes('bottom')) itemToUpdate.y -= dh / 2;
+                    else if (ap.includes('bottom')) itemToUpdate.y -= dh;
+                } else if (itemToUpdate.type === 'group') {
+                    const groupAnchorGlobalY = itemToUpdate.y + getAnchorOffsetInBaseCoords(itemToUpdate, currentAnchorPoint).y;
+                    const scaleFactor = value / oldProps.h;
+                    if (isFinite(scaleFactor) && scaleFactor > 0) {
+                        itemToUpdate.members.forEach(member => {
+                            member.y = groupAnchorGlobalY + (member.y - groupAnchorGlobalY) * scaleFactor;
+                            member.h *= scaleFactor; if(member.type === 'group') updateAllBoundingBoxes(member);
+                        });
+                        updateAllBoundingBoxes(itemToUpdate);
+                        const newAnchorOffsetY = getAnchorOffsetInBaseCoords(itemToUpdate, currentAnchorPoint).y;
+                        itemToUpdate.y = groupAnchorGlobalY - newAnchorOffsetY;
+                    }
+                }
             }
+            renderAllRectangles(); updateInputFields(primarySelectedBaseRect);
+        }
+    }
+
+    [rectXInput, rectYInput, rectWidthInput, rectHeightInput].forEach(input => {
+        input.addEventListener('keydown', (event) => {
+            if (event.key === 'Enter') { handleInputChange(input); input.blur(); }
         });
+        input.addEventListener('blur', () => { handleInputChange(input); });
         input.addEventListener('keypress', (event) => {
             const charCode = (event.which) ? event.which : event.keyCode;
-            if (charCode > 31 && (charCode < 48 || charCode > 57) && charCode !== 46 && charCode !== 45) {event.preventDefault(); return;}
-            const kValue = event.target.value;
-            if (charCode === 46 && kValue.includes('.')) { event.preventDefault(); return; }
-            if (charCode === 45) { if (!(input === rectXInput || input === rectYInput) || kValue.length > 0 || kValue.includes('-')) { event.preventDefault(); return;}}
+            const allowedChars = /[0-9+\-*/().\s]/;
+            if (charCode > 31 && !allowedChars.test(String.fromCharCode(charCode)) && charCode !== 13) event.preventDefault();
         });
     });
 
-    updateInputFields(null); // Initial call
+    updateInputFields(null);
 
     deleteRectBtn.addEventListener('click', () => {
         let itemsToDeleteDirectly = [];
@@ -558,6 +617,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (indexInBase > -1) baseRectangles.splice(indexInBase, 1);
             });
             selectedRectsDOM = []; primarySelectedBaseRect = null; updateInputFields(null);
+            renderAllRectangles();
         }
     });
 
@@ -567,10 +627,8 @@ document.addEventListener('DOMContentLoaded', () => {
             if (item.type === 'group') plainItem.members = item.members.map(member => member.id);
             return plainItem;
         });
-        const editorData = { canvasObjects: dataToSave, settings: { rectCounter, groupCounter, currentHighestZIndex, logicalZoom } };
-        const jsonString = JSON.stringify(editorData, null, 2);
-        console.log("Mentett adatok:", jsonString);
-        const blob = new Blob([jsonString], {type: 'application/json'});
+        const editorData = { canvasObjects: dataToSave, settings: { rectCounter, groupCounter, currentHighestZIndex, logicalZoom, panX, panY } };
+        const blob = new Blob([JSON.stringify(editorData, null, 2)], {type: 'application/json'});
         const url = URL.createObjectURL(blob); const a = document.createElement('a');
         a.href = url; a.download = 'canvas_layout.json'; document.body.appendChild(a); a.click();
         document.body.removeChild(a); URL.revokeObjectURL(url);
@@ -581,23 +639,23 @@ document.addEventListener('DOMContentLoaded', () => {
         fileInput.type = 'file'; fileInput.accept = '.json,application/json';
         fileInput.addEventListener('change', (event) => {
             const file = event.target.files[0]; if (!file) return;
-            if (!file.name.toLowerCase().endsWith('.json')) { alert('Kérlek, .json kiterjesztésű fájlt válassz!'); return; }
             const reader = new FileReader();
             reader.onload = (e) => {
-                const fileContent = e.target.result;
                 try {
-                    const loadedData = JSON.parse(fileContent);
-                    if (loadedData && loadedData.canvasObjects && Array.isArray(loadedData.canvasObjects)) {
+                    const loadedData = JSON.parse(e.target.result);
+                    if (loadedData && loadedData.canvasObjects) {
                         clearCanvas();
                         if(loadedData.settings){
                             rectCounter = loadedData.settings.rectCounter || 0; groupCounter = loadedData.settings.groupCounter || 0;
-                            currentHighestZIndex = loadedData.settings.currentHighestZIndex || 1; logicalZoom = loadedData.settings.logicalZoom || 1.0;
+                            currentHighestZIndex = loadedData.settings.currentHighestZIndex || 1;
+                            logicalZoom = loadedData.settings.logicalZoom || 1.0;
+                            panX = loadedData.settings.panX || 0; panY = loadedData.settings.panY || 0;
                         }
                         const itemMap = new Map(); baseRectangles = [];
                         loadedData.canvasObjects.forEach(itemData => {
                             let newItem;
                             if (itemData.type === 'rectangle') {
-                                const domEl = document.createElement('div'); domEl.id = itemData.id; domEl.classList.add('rectangle'); canvas.appendChild(domEl);
+                                const domEl = document.createElement('div'); domEl.id = itemData.id; domEl.classList.add('rectangle'); viewport.appendChild(domEl);
                                 newItem = new CanvasRectangle(itemData.id, itemData.x, itemData.y, itemData.w, itemData.h, itemData.zIndex, domEl, itemData.parentId);
                                 domEl.addEventListener('mousedown', handleItemMouseDown);
                             } else if (itemData.type === 'group') {
@@ -611,118 +669,73 @@ document.addEventListener('DOMContentLoaded', () => {
                             if (item.type === 'group' && itemData.members) {
                                 itemData.members.forEach(memberId => {
                                     const memberInstance = itemMap.get(memberId);
-                                    if (memberInstance && !item.members.includes(memberInstance)) item.addMember(memberInstance);
+                                    if (memberInstance) item.addMember(memberInstance);
                                 });
-                            } else if (itemData.parentId && item.parentId !== itemData.parentId && itemMap.has(itemData.parentId)) item.parentId = itemData.parentId;
+                            }
                         });
                         renderAllRectangles(); updateZoomDisplay();
-                         if (baseRectangles.length > 0) {
-                            let topItem = null; let highestZ = -Infinity;
-                            baseRectangles.filter(it => it.parentId === null).forEach(br => { if (br.zIndex > highestZ) { highestZ = br.zIndex; topItem = br; } });
-                            if (topItem) {
-                                if (topItem.domElement) selectRectangle(topItem.domElement);
-                                else {
-                                    primarySelectedBaseRect = topItem;
-                                    if(topItem.type === 'group') {
-                                        topItem.createOrUpdateDomElement(canvas, logicalZoom);
-                                        if(topItem.domElement) {
-                                            selectedRectsDOM = [topItem.domElement]; topItem.domElement.classList.add('selected');
-                                            topItem.domElement.addEventListener('mousedown', handleItemMouseDown);
-                                        }
-                                    }
-                                    updateInputFields(primarySelectedBaseRect);
-                                }
-                            }
-                        } else { updateInputFields(null); }
-                    } else { alert("Érvénytelen JSON formátum."); }
-                } catch (error) { alert("Hiba a JSON fájl feldolgozásakor: " + error.message); console.error("JSON Parse Error:", error); }
+                        if (baseRectangles.length > 0) {
+                            let topItem = baseRectangles.filter(it => it.parentId === null).sort((a,b) => b.zIndex - a.zIndex)[0];
+                            if (topItem) selectItem(topItem);
+                        }
+                    }
+                } catch (error) { console.error(error); }
             };
-            reader.onerror = (e) => { alert("Hiba a fájl olvasásakor."); console.error("File Read Error:", e); };
             reader.readAsText(file);
         });
         fileInput.click();
     });
 
     resetBtn.addEventListener('click', () => { if (confirm("Biztosan törölni szeretnéd az összes téglalapot és visszaállítani az alapot?")) clearCanvas(); });
-    
+
     function duplicateItemRecursive(originalItem, newParentIdForMembers, xOffset, yOffset) {
         let newItem;
         const newX = originalItem.x + xOffset;
         const newY = originalItem.y + yOffset;
-        currentHighestZIndex++; 
-    
+        currentHighestZIndex++;
         if (originalItem.type === 'rectangle') {
             const newId = `rect-${rectCounter++}`;
             const rectElement = document.createElement('div');
-            rectElement.id = newId; 
-            rectElement.classList.add('rectangle');
-            
+            rectElement.id = newId; rectElement.classList.add('rectangle');
             newItem = new CanvasRectangle(newId, newX, newY, originalItem.w, originalItem.h, currentHighestZIndex, rectElement, newParentIdForMembers);
-            baseRectangles.push(newItem); 
-            canvas.appendChild(rectElement);
+            baseRectangles.push(newItem); viewport.appendChild(rectElement);
             rectElement.addEventListener('mousedown', handleItemMouseDown);
         } else if (originalItem.type === 'group') {
             const newId = `group-${groupCounter++}`;
             newItem = new CanvasGroup(newId, newParentIdForMembers);
             newItem.zIndex = currentHighestZIndex;
-    
             originalItem.members.forEach(member => {
-                const duplicatedMember = duplicateItemRecursive(member, newItem.id, xOffset, yOffset); 
-                newItem.addMember(duplicatedMember); 
+                const duplicatedMember = duplicateItemRecursive(member, newItem.id, xOffset, yOffset);
+                newItem.addMember(duplicatedMember);
             });
-            newItem.calculateBoundingBox(); 
-            baseRectangles.push(newItem);
-            newItem.createOrUpdateDomElement(canvas, logicalZoom); 
-            if (newItem.domElement) {
-                newItem.domElement.addEventListener('mousedown', handleItemMouseDown);
-            }
+            newItem.calculateBoundingBox(); baseRectangles.push(newItem);
         }
         return newItem;
-    }    
+    }
 
     duplicateRectBtn.addEventListener('click', () => {
         let itemsToDuplicateSource = [];
         if (selectedRectsDOM.length > 0) {
-            itemsToDuplicateSource = selectedRectsDOM.map(domEl => 
-                baseRectangles.find(br => br.domElement === domEl)
-            ).filter(instance => instance); 
-        } else if (primarySelectedBaseRect) { 
-            itemsToDuplicateSource = [primarySelectedBaseRect];
-        }
-
-        if (itemsToDuplicateSource.length === 0) return; 
-        
-        deselectAllRectanglesStyling(); 
-        selectedRectsDOM = []; 
-        
+            itemsToDuplicateSource = selectedRectsDOM.map(domEl => baseRectangles.find(br => br.domElement === domEl)).filter(instance => instance);
+        } else if (primarySelectedBaseRect) itemsToDuplicateSource = [primarySelectedBaseRect];
+        if (itemsToDuplicateSource.length === 0) return;
+        deselectAllRectanglesStyling(); selectedRectsDOM = [];
         const newTopLevelItems = [];
         itemsToDuplicateSource.forEach(itemToDuplicate => {
             const newDuplicatedItem = duplicateItemRecursive(itemToDuplicate, null, 10, 10);
-            if (newDuplicatedItem) {
-                newTopLevelItems.push(newDuplicatedItem);
-            }
+            if (newDuplicatedItem) newTopLevelItems.push(newDuplicatedItem);
         });
-
-        let newPrimarySelection = null;
         if (newTopLevelItems.length > 0) {
-            newPrimarySelection = newTopLevelItems[0]; 
+            primarySelectedBaseRect = newTopLevelItems[0];
             newTopLevelItems.forEach(item => {
-                if (item.domElement) { 
-                    selectedRectsDOM.push(item.domElement);
-                    item.domElement.classList.add('selected');
-                } else if (item.type === 'group' && !item.domElement) {
-                    console.warn("Duplicated group has no DOM element for selection styling:", item.id);
-                }
+                if (item.domElement) { selectedRectsDOM.push(item.domElement); item.domElement.classList.add('selected'); }
             });
         }
-        primarySelectedBaseRect = newPrimarySelection;
-        updateInputFields(primarySelectedBaseRect);
-        renderAllRectangles();
+        updateInputFields(primarySelectedBaseRect); renderAllRectangles();
     });
 
-    // MODIFIED LISTENERS
-    rotateCwBtn.addEventListener('click', () => swapSelectedRectangleDimensions('cw')); 
-    rotateCcwBtn.addEventListener('click', () => swapSelectedRectangleDimensions('ccw')); 
+    rotateCwBtn.addEventListener('click', () => swapSelectedRectangleDimensions('cw'));
+    rotateCcwBtn.addEventListener('click', () => swapSelectedRectangleDimensions('ccw'));
 
     canvas.addEventListener('wheel', (event) => {
         event.preventDefault();
@@ -730,22 +743,49 @@ document.addEventListener('DOMContentLoaded', () => {
         let newLogicalZoom = logicalZoom + delta;
         newLogicalZoom = Math.max(MIN_ZOOM, newLogicalZoom); newLogicalZoom = Math.min(MAX_ZOOM, newLogicalZoom);
         if (newLogicalZoom === logicalZoom) return;
-        logicalZoom = newLogicalZoom; canvas.style.backgroundSize = `${10 * logicalZoom}px ${10 * logicalZoom}px`;
+
+        // Zoom relative to mouse position
+        const mouseCanvasX = event.clientX - canvas.getBoundingClientRect().left;
+        const mouseCanvasY = event.clientY - canvas.getBoundingClientRect().top;
+        const mouseBaseX = (mouseCanvasX - panX) / logicalZoom;
+        const mouseBaseY = (mouseCanvasY - panY) / logicalZoom;
+
+        logicalZoom = newLogicalZoom;
+        panX = mouseCanvasX - mouseBaseX * logicalZoom;
+        panY = mouseCanvasY - mouseBaseY * logicalZoom;
+
         renderAllRectangles(); updateZoomDisplay();
     });
 
     resetZoomBtn.addEventListener('click', () => {
-        logicalZoom = 1.0; canvas.style.backgroundSize = `${10 * logicalZoom}px ${10 * logicalZoom}px`;
+        logicalZoom = 1.0; panX = 0; panY = 0;
         updateZoomDisplay(); renderAllRectangles();
     });
 
-    const zoomPercentages = [25, 50, 75, 100, 125, 150, 200, 400];
+    const zoomPercentages = [5, 10, 25, 50, 75, 100, 125, 150, 200, 400, 800];
     zoomPercentages.forEach(percentage => {
         const option = document.createElement('option');
         option.value = percentage / 100; option.textContent = `${percentage}%`;
         if (zoomLevelSelect) zoomLevelSelect.appendChild(option);
     });
-    updateZoomDisplay();
+
+    zoomLevelSelect.addEventListener('change', (event) => {
+        const newLogicalZoom = parseFloat(event.target.value);
+        if (!isNaN(newLogicalZoom)) {
+            logicalZoom = newLogicalZoom; renderAllRectangles(); updateZoomDisplay();
+        }
+    });
+
+    zoomInput.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter') {
+            let val = parseFloat(zoomInput.value.replace('%', ''));
+            if (!isNaN(val)) {
+                logicalZoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, val / 100));
+                renderAllRectangles(); updateZoomDisplay();
+            }
+            zoomInput.blur();
+        }
+    });
 
     const anchorRadioButtons = document.querySelectorAll('input[name="anchor-point"]');
     anchorRadioButtons.forEach(radio => {
@@ -755,38 +795,33 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     });
 
-    zoomLevelSelect.addEventListener('change', (event) => {
-        const newLogicalZoom = parseFloat(event.target.value);
-        if (!isNaN(newLogicalZoom) && newLogicalZoom >= MIN_ZOOM && newLogicalZoom <= MAX_ZOOM) {
-            logicalZoom = newLogicalZoom; canvas.style.backgroundSize = `${10 * logicalZoom}px ${10 * logicalZoom}px`;
-            renderAllRectangles(); updateZoomDisplay(); 
-        }
+    selectModeBtn.addEventListener('click', () => {
+        interactionMode = 'select';
+        selectModeBtn.classList.add('mode-active');
+        panModeBtn.classList.remove('mode-active');
+        canvas.style.cursor = 'default';
     });
 
-    document.addEventListener('keydown', (event) => {
-        const activeTagName = document.activeElement ? document.activeElement.tagName : null;
-        const isInputFocused = activeTagName === 'INPUT' || activeTagName === 'TEXTAREA';
-        if (event.ctrlKey) {
-            if (event.key === 'c' || event.key === 'C') {
-                if (isInputFocused) return;
-                if (duplicateRectBtn.style.display !== 'none') duplicateRectBtn.click();
-                event.preventDefault();
-            } else if (event.key === 's' || event.key === 'S') {
-                saveBtn.click(); event.preventDefault();
-            } else if (event.key === 'r' || event.key === 'R') {
-                resetBtn.click(); event.preventDefault();
-            } else if (event.key === 'd' || event.key === 'D') {
-                if (isInputFocused) return;
-                if (deleteRectBtn.style.display !== 'none') deleteRectBtn.click();
-                event.preventDefault();
-            }
-        } else {
-            if (event.key === 'Delete') {
-                if (isInputFocused) return;
-                if (deleteRectBtn.style.display !== 'none') deleteRectBtn.click();
-                event.preventDefault();
-            }
-        }
+    panModeBtn.addEventListener('click', () => {
+        interactionMode = 'pan';
+        panModeBtn.classList.add('mode-active');
+        selectModeBtn.classList.remove('mode-active');
+        canvas.style.cursor = 'grab';
+    });
+
+    fitBtn.addEventListener('click', () => {
+        if (baseRectangles.length === 0) return;
+        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+        baseRectangles.forEach(item => {
+            minX = Math.min(minX, item.x); minY = Math.min(minY, item.y);
+            maxX = Math.max(maxX, item.x + item.w); maxY = Math.max(maxY, item.y + item.h);
+        });
+        const contentW = maxX - minX; const contentH = maxY - minY;
+        const canvasW = canvas.clientWidth - 40; const canvasH = canvas.clientHeight - 40;
+        logicalZoom = Math.min(canvasW / contentW, canvasH / contentH, 1.0);
+        panX = (canvas.clientWidth - contentW * logicalZoom) / 2 - minX * logicalZoom;
+        panY = (canvas.clientHeight - contentH * logicalZoom) / 2 - minY * logicalZoom;
+        renderAllRectangles(); updateZoomDisplay();
     });
 
     groupBtn.addEventListener('click', () => {
@@ -803,14 +838,7 @@ document.addEventListener('DOMContentLoaded', () => {
             selectedInstances.forEach(instance => newGroup.addMember(instance));
             newGroup.calculateBoundingBox(); baseRectangles.push(newGroup);
             deselectAllRectanglesStyling(); selectedRectsDOM = [];
-            newGroup.createOrUpdateDomElement(canvas, logicalZoom);
-            if (newGroup.domElement) {
-                selectedRectsDOM.push(newGroup.domElement);
-                newGroup.domElement.classList.add('selected');
-                newGroup.domElement.addEventListener('mousedown', handleItemMouseDown);
-            }
-            primarySelectedBaseRect = newGroup;
-            updateInputFields(primarySelectedBaseRect); renderAllRectangles();
+            selectItem(newGroup);
         }
     });
 
@@ -829,13 +857,37 @@ document.addEventListener('DOMContentLoaded', () => {
             if (groupIndex > -1) baseRectangles.splice(groupIndex, 1);
             deselectAllRectanglesStyling(); selectedRectsDOM = [];
             membersToRelease.forEach(member => {
-                if (member.domElement) {
-                    selectedRectsDOM.push(member.domElement);
-                    member.domElement.classList.add('selected');
-                }
+                if (member.domElement) { selectedRectsDOM.push(member.domElement); member.domElement.classList.add('selected'); }
             });
             primarySelectedBaseRect = membersToRelease.length > 0 ? membersToRelease[0] : null;
             updateInputFields(primarySelectedBaseRect); renderAllRectangles();
         }
     });
+
+    function exportToSVG() {
+        if (baseRectangles.length === 0) { alert("Nincs mit exportálni!"); return; }
+        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+        baseRectangles.forEach(item => {
+            if (item.type === 'rectangle') {
+                minX = Math.min(minX, item.x); minY = Math.min(minY, item.y);
+                maxX = Math.max(maxX, item.x + item.w); maxY = Math.max(maxY, item.y + item.h);
+            }
+        });
+        const padding = 20;
+        const width = maxX - minX + padding * 2;
+        const height = maxY - minY + padding * 2;
+        const offsetX = -minX + padding;
+        const offsetY = -minY + padding;
+
+        let svgContent = `<?xml version="1.0" encoding="UTF-8" standalone="no"?>\n<svg width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" xmlns="http://www.w3.org/2000/svg">\n`;
+        baseRectangles.filter(item => item.type === 'rectangle').sort((a,b) => a.zIndex - b.zIndex).forEach(rect => {
+            svgContent += `  <rect x="${rect.x + offsetX}" y="${rect.y + offsetY}" width="${rect.w}" height="${rect.h}" fill="rgba(200, 200, 200, 0.6)" stroke="black" stroke-width="1" />\n`;
+        });
+        svgContent += '</svg>';
+        const blob = new Blob([svgContent], {type: 'image/svg+xml'});
+        const url = URL.createObjectURL(blob); const a = document.createElement('a');
+        a.href = url; a.download = 'export.svg'; document.body.appendChild(a); a.click();
+        document.body.removeChild(a); URL.revokeObjectURL(url);
+    }
+    exportSvgBtn.addEventListener('click', exportToSVG);
 });
