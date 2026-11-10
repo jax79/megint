@@ -1,0 +1,830 @@
+<!DOCTYPE html>
+<html lang="hu">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Aknakereső</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      user-select: none;
+      -webkit-user-select: none;
+      -webkit-touch-callout: none;
+    }
+
+    body {
+      font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, Roboto, sans-serif;
+      background: radial-gradient(circle at 50% 15%, #185a7a 0%, #0d3246 45%, #051622 100%);
+      color: #ffffff;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: flex-start;
+      overflow-x: hidden;
+      touch-action: manipulation;
+    }
+
+    /* Ambient nautical background elements */
+    .bg-wave-accent {
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      height: 120px;
+      background: linear-gradient(to top, rgba(3, 18, 28, 0.95), transparent);
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    .game-container {
+      width: 100%;
+      max-width: 440px;
+      padding: 14px 16px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      min-height: 100vh;
+      position: relative;
+      z-index: 1;
+    }
+
+    /* Game Header / HUD */
+    header {
+      width: 100%;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background: linear-gradient(180deg, rgba(20, 56, 78, 0.95) 0%, rgba(11, 37, 53, 0.95) 100%);
+      border: 2px solid #2f81ab;
+      border-radius: 16px;
+      padding: 10px 16px;
+      margin-bottom: 14px;
+      box-shadow: 0 6px 20px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.2);
+    }
+
+    .level-meta {
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+    }
+
+    .level-title {
+      font-size: 15px;
+      font-weight: 800;
+      color: #bbf2f6;
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
+    }
+
+    .status-badge {
+      font-size: 12px;
+      padding: 2px 10px;
+      border-radius: 12px;
+      background: #174258;
+      color: #ffe082;
+      font-weight: 700;
+      display: inline-block;
+      width: fit-content;
+      box-shadow: inset 0 1px 3px rgba(0,0,0,0.4);
+    }
+
+    .hud-controls {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+
+    .mine-counter {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 17px;
+      font-weight: 800;
+      color: #ffd54f;
+      background: rgba(4, 19, 29, 0.6);
+      padding: 6px 12px;
+      border-radius: 20px;
+      border: 1px solid #1a5675;
+      text-shadow: 0 1px 2px rgba(0,0,0,0.6);
+    }
+
+    .btn-restart {
+      background: linear-gradient(180deg, #ffca28 0%, #f57f17 100%);
+      border: 2px solid #fff59d;
+      border-radius: 50%;
+      width: 44px;
+      height: 44px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 22px;
+      color: #3e2723;
+      box-shadow: 0 4px 10px rgba(0,0,0,0.4), inset 0 1px 1px rgba(255,255,255,0.7);
+      transition: transform 0.1s ease, filter 0.15s ease;
+    }
+    .btn-restart:hover {
+      filter: brightness(1.1);
+    }
+    .btn-restart:active {
+      transform: scale(0.92);
+    }
+
+    /* Board Frame */
+    .board-wrapper {
+      flex: 1;
+      width: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: linear-gradient(180deg, rgba(8, 27, 39, 0.9) 0%, rgba(5, 18, 27, 0.95) 100%);
+      border: 2px solid #236488;
+      border-radius: 18px;
+      padding: 14px;
+      box-shadow: inset 0 0 25px rgba(0, 0, 0, 0.75), 0 8px 24px rgba(0, 0, 0, 0.4);
+      position: relative;
+      overflow: hidden;
+    }
+
+    .board-wrapper::before {
+      content: "";
+      position: absolute;
+      top: -50%;
+      left: -50%;
+      width: 200%;
+      height: 200%;
+      background: radial-gradient(circle, rgba(41, 182, 246, 0.04) 10%, transparent 60%);
+      pointer-events: none;
+    }
+
+    .grid {
+      display: grid;
+      gap: 5px;
+      justify-content: center;
+      align-content: center;
+      margin: auto;
+      z-index: 1;
+    }
+
+    /* Cells */
+    .cell {
+      border-radius: 7px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 800;
+      transition: background-color 0.12s, transform 0.08s, box-shadow 0.12s;
+      position: relative;
+    }
+
+    .cell.inactive {
+      visibility: hidden;
+      pointer-events: none;
+    }
+
+    /* Hidden covered tile: turquoise jewel look matching reference */
+    .cell.hidden {
+      background: linear-gradient(135deg, #38c8f4 0%, #0093c4 65%, #00739c 100%);
+      border: 1.5px solid #8fe3ff;
+      box-shadow: 0 4px 0 #005473, inset 0 1px 2px rgba(255, 255, 255, 0.75);
+      cursor: pointer;
+    }
+
+    .cell.hidden:active {
+      transform: translateY(3px);
+      box-shadow: 0 1px 0 #005473;
+    }
+
+    /* Revealed empty/numbered tile: sunken ocean depths */
+    .cell.revealed {
+      background: #092636;
+      border: 1px solid #14445f;
+      box-shadow: inset 0 2px 5px rgba(0, 0, 0, 0.65);
+      cursor: default;
+    }
+
+    .cell.flagged {
+      background: linear-gradient(135deg, #38c8f4 0%, #0093c4 100%);
+      border: 1.5px solid #8fe3ff;
+      box-shadow: 0 4px 0 #005473;
+    }
+
+    .cell.mine-hit {
+      background: #d32f2f !important;
+      border: 2px solid #ff8a80 !important;
+      box-shadow: 0 0 15px rgba(239, 83, 80, 0.8) !important;
+      animation: explode 0.3s ease forwards;
+    }
+
+    .cell.mine-revealed {
+      background: #871c1c;
+      border: 1.5px solid #ef5350;
+    }
+
+    @keyframes explode {
+      0% { transform: scale(1); }
+      50% { transform: scale(1.18); }
+      100% { transform: scale(1); }
+    }
+
+    /* Classic digit styling */
+    .num-1 { color: #5ec7f8; text-shadow: 0 0 8px rgba(94, 199, 248, 0.5); }
+    .num-2 { color: #81c784; text-shadow: 0 0 8px rgba(129, 199, 132, 0.5); }
+    .num-3 { color: #ff7675; text-shadow: 0 0 8px rgba(255, 118, 117, 0.5); }
+    .num-4 { color: #ba68c8; text-shadow: 0 0 8px rgba(186, 104, 200, 0.5); }
+    .num-5 { color: #ffb74d; text-shadow: 0 0 8px rgba(255, 183, 77, 0.5); }
+    .num-6 { color: #26c6da; text-shadow: 0 0 8px rgba(38, 198, 218, 0.5); }
+    .num-7 { color: #f06292; text-shadow: 0 0 8px rgba(240, 98, 146, 0.5); }
+    .num-8 { color: #ffffff; text-shadow: 0 0 8px rgba(255, 255, 255, 0.7); }
+
+    .instructions {
+      margin-top: 14px;
+      font-size: 13px;
+      color: #92b8cd;
+      text-align: center;
+      line-height: 1.5;
+      background: rgba(10, 34, 48, 0.65);
+      padding: 8px 16px;
+      border-radius: 14px;
+      border: 1px solid #18465f;
+    }
+
+    /* Overlay modal for Win/Loss */
+    .overlay {
+      position: absolute;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(3, 14, 22, 0.92);
+      backdrop-filter: blur(4px);
+      border-radius: 16px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 16px;
+      z-index: 10;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.25s ease;
+      padding: 20px;
+    }
+
+    .overlay.visible {
+      opacity: 1;
+      pointer-events: auto;
+    }
+
+    .overlay-title {
+      font-size: 27px;
+      font-weight: 800;
+      letter-spacing: 0.5px;
+      text-align: center;
+    }
+    .overlay-title.win { color: #66bb6a; text-shadow: 0 0 15px rgba(102, 187, 106, 0.5); }
+    .overlay-title.lose { color: #ef5350; text-shadow: 0 0 15px rgba(239, 83, 80, 0.5); }
+
+    .overlay-msg {
+      font-size: 15px;
+      color: #d1e4ed;
+      text-align: center;
+      max-width: 300px;
+      line-height: 1.4;
+    }
+
+    .btn-action {
+      background: linear-gradient(180deg, #0288d1 0%, #01579b 100%);
+      color: #fff;
+      border: 2px solid #4fc3f7;
+      padding: 12px 28px;
+      border-radius: 28px;
+      font-size: 16px;
+      font-weight: 800;
+      cursor: pointer;
+      box-shadow: 0 4px 14px rgba(0,0,0,0.5), inset 0 1px 1px rgba(255,255,255,0.4);
+      transition: transform 0.1s ease, filter 0.15s ease;
+      letter-spacing: 0.5px;
+    }
+    .btn-action:hover {
+      filter: brightness(1.1);
+    }
+    .btn-action:active {
+      transform: scale(0.95);
+    }
+  </style>
+</head>
+<body>
+  <div class="bg-wave-accent"></div>
+  <div class="game-container">
+    <header>
+      <div class="level-meta">
+        <div class="level-title" id="levelName">Pálya 1 / 3</div>
+        <div class="status-badge" id="gameStatus">Játékban</div>
+      </div>
+      <div class="hud-controls">
+        <div class="mine-counter" title="Fennmaradó aknák">
+          <span>💣</span>
+          <span id="minesLeft">0</span>
+        </div>
+        <button id="btnRestart" class="btn-restart" title="Újraindítás">↻</button>
+      </div>
+    </header>
+
+    <div class="board-wrapper">
+      <div class="grid" id="grid"></div>
+
+      <div class="overlay" id="overlay">
+        <div class="overlay-title" id="overlayTitle">Győzelem! 🏆</div>
+        <div class="overlay-msg" id="overlayMsg">Sikeresen megtisztítottad a pályát!</div>
+        <button class="btn-action" id="overlayBtn">Következő pálya ➔</button>
+      </div>
+    </div>
+
+    <div class="instructions">
+      💡 <b>Kattintás / Érintés:</b> Felfedés &bull; <b>Hosszú nyomás / Jobb klikk:</b> Zászló (🚩)
+    </div>
+  </div>
+
+  <script>
+    /**
+     * PÁLYA KONFIGURÁCIÓK (JSON-ALAPÚ)
+     *
+     * 1. szint: Rombusz / cikk-cakkos forma (a mellékelt fotó alapján), dinamikus aknagenerálással.
+     *    - 'path': 0 = inaktív/üres terület, 1 = aktív pályacella.
+     *    - 'mines': elhelyezendő aknák száma (első kattintás garantáltan biztonságos).
+     *
+     * 2. szint: Fixen megadott aknák ('path_with_mines').
+     *    - 0 = inaktív, 1 = üres pályacella, 2 = aknát tartalmazó cella.
+     *
+     * 3. szint: Kalóz-öböl sziget forma, dinamikus aknákkal.
+     */
+    const LEVELS_CONFIG = [
+      {
+        level_id: "level_0001",
+        name: "1. szint - Kincses Rombusz",
+        rows: 9,
+        cols: 9,
+        path: [
+          "000010000",
+          "000111000",
+          "001111100",
+          "011111110",
+          "111111111",
+          "011111110",
+          "001111100",
+          "000111000",
+          "000010000"
+        ],
+        mines: 6
+      },
+      {
+        level_id: "level_0002",
+        name: "2. szint - Kalóz Cikk-cakk (Fix aknák)",
+        rows: 6,
+        cols: 8,
+        path_with_mines: [
+          "01111110",
+          "11211211",
+          "12111121",
+          "11122111",
+          "11211211",
+          "01111110"
+        ]
+      },
+      {
+        level_id: "level_0003",
+        name: "3. szint - Kalóz-öböl",
+        rows: 8,
+        cols: 8,
+        path: [
+          "00111100",
+          "01111110",
+          "11000011",
+          "11000011",
+          "11000011",
+          "11000011",
+          "01111110",
+          "00111100"
+        ],
+        mines: 7
+      }
+    ];
+
+    class MinesweeperGame {
+      constructor(levels) {
+        this.levels = levels;
+        this.currentLevelIndex = 0;
+        this.gridEl = document.getElementById('grid');
+        this.levelNameEl = document.getElementById('levelName');
+        this.gameStatusEl = document.getElementById('gameStatus');
+        this.minesLeftEl = document.getElementById('minesLeft');
+        this.btnRestart = document.getElementById('btnRestart');
+        this.overlay = document.getElementById('overlay');
+        this.overlayTitle = document.getElementById('overlayTitle');
+        this.overlayMsg = document.getElementById('overlayMsg');
+        this.overlayBtn = document.getElementById('overlayBtn');
+
+        this.board = [];
+        this.rows = 0;
+        this.cols = 0;
+        this.totalMines = 0;
+        this.firstClickDone = false;
+        this.gameOver = false;
+        this.gameWon = false;
+
+        this.touchMoved = false;
+
+        this.init();
+      }
+
+      init() {
+        this.btnRestart.addEventListener('click', () => this.restartLevel());
+        this.overlayBtn.addEventListener('click', () => this.onOverlayBtnClick());
+
+        // Prevent context menu on grid
+        this.gridEl.addEventListener('contextmenu', (e) => e.preventDefault());
+
+        this.loadLevel(this.currentLevelIndex);
+      }
+
+      loadLevel(index) {
+        this.currentLevelIndex = index % this.levels.length;
+        const config = this.levels[this.currentLevelIndex];
+
+        this.rows = config.rows;
+        this.cols = config.cols;
+        this.firstClickDone = false;
+        this.gameOver = false;
+        this.gameWon = false;
+
+        this.hideOverlay();
+        this.levelNameEl.textContent = `${this.currentLevelIndex + 1} / ${this.levels.length} - ${config.name.split(' - ')[1] || config.name}`;
+        this.gameStatusEl.textContent = "Játékban";
+        this.gameStatusEl.style.color = "#ffe082";
+
+        this.createBoardData(config);
+        this.renderGrid();
+        this.updateMinesCounter();
+      }
+
+      createBoardData(config) {
+        this.board = [];
+        let fixedMinesCount = 0;
+
+        for (let r = 0; r < this.rows; r++) {
+          const rowData = [];
+          const pathRow = config.path_with_mines ? config.path_with_mines[r] : config.path[r];
+
+          for (let c = 0; c < this.cols; c++) {
+            const char = pathRow ? pathRow[c] : '0';
+            const isActive = char === '1' || char === '2';
+            const isMine = char === '2';
+
+            if (isMine) fixedMinesCount++;
+
+            rowData.push({
+              r,
+              c,
+              isActive,
+              isMine,
+              isRevealed: false,
+              isFlagged: false,
+              adjacentMines: 0
+            });
+          }
+          this.board.push(rowData);
+        }
+
+        if (config.path_with_mines) {
+          this.totalMines = fixedMinesCount;
+          this.firstClickDone = true; // No dynamic placement needed
+          this.calculateAdjacency();
+        } else {
+          this.totalMines = config.mines || 5;
+        }
+      }
+
+      generateDynamicMines(startRow, startCol) {
+        const availableCells = [];
+        for (let r = 0; r < this.rows; r++) {
+          for (let c = 0; c < this.cols; c++) {
+            // Must be active and NOT the first clicked cell
+            if (this.board[r][c].isActive && !(r === startRow && c === startCol)) {
+              availableCells.push(this.board[r][c]);
+            }
+          }
+        }
+
+        // Shuffle cells (Fisher-Yates)
+        for (let i = availableCells.length - 1; i > 0; i--) {
+          const j = Math.floor(Math.random() * (i + 1));
+          [availableCells[i], availableCells[j]] = [availableCells[j], availableCells[i]];
+        }
+
+        const minesToPlace = Math.min(this.totalMines, availableCells.length);
+        for (let i = 0; i < minesToPlace; i++) {
+          availableCells[i].isMine = true;
+        }
+
+        this.calculateAdjacency();
+      }
+
+      calculateAdjacency() {
+        for (let r = 0; r < this.rows; r++) {
+          for (let c = 0; c < this.cols; c++) {
+            const cell = this.board[r][c];
+            if (!cell.isActive || cell.isMine) continue;
+
+            let count = 0;
+            this.forEachNeighbor(r, c, (neighbor) => {
+              if (neighbor.isMine) count++;
+            });
+            cell.adjacentMines = count;
+          }
+        }
+      }
+
+      forEachNeighbor(row, col, callback) {
+        // 8-directional classic neighbor lookup
+        for (let dr = -1; dr <= 1; dr++) {
+          for (let dc = -1; dc <= 1; dc++) {
+            if (dr === 0 && dc === 0) continue;
+            const nr = row + dr;
+            const nc = col + dc;
+            if (nr >= 0 && nr < this.rows && nc >= 0 && nc < this.cols) {
+              const neighbor = this.board[nr][nc];
+              if (neighbor.isActive) {
+                callback(neighbor);
+              }
+            }
+          }
+        }
+      }
+
+      renderGrid() {
+        this.gridEl.innerHTML = '';
+        this.gridEl.style.gridTemplateColumns = `repeat(${this.cols}, 1fr)`;
+
+        // Calculate dynamic cell size based on board cols & rows for mobile fitting
+        const maxDimension = Math.max(this.cols, this.rows);
+        const cellSize = Math.min(42, Math.max(28, Math.floor(320 / maxDimension)));
+
+        for (let r = 0; r < this.rows; r++) {
+          for (let c = 0; c < this.cols; c++) {
+            const cellData = this.board[r][c];
+            const cellEl = document.createElement('div');
+            cellEl.className = 'cell';
+            cellEl.id = `cell-${r}-${c}`;
+            cellEl.style.width = `${cellSize}px`;
+            cellEl.style.height = `${cellSize}px`;
+            cellEl.style.fontSize = `${Math.floor(cellSize * 0.52)}px`;
+
+            if (!cellData.isActive) {
+              cellEl.classList.add('inactive');
+            } else {
+              cellEl.classList.add('hidden');
+              this.attachCellEvents(cellEl, cellData);
+            }
+
+            this.gridEl.appendChild(cellEl);
+          }
+        }
+      }
+
+      attachCellEvents(cellEl, cellData) {
+        // Desktop Right Click for Flagging
+        cellEl.addEventListener('contextmenu', (e) => {
+          e.preventDefault();
+          this.toggleFlag(cellData);
+        });
+
+        // Touch Long-Press Support for Mobile
+        let touchTimer = null;
+        let isLongPress = false;
+
+        cellEl.addEventListener('touchstart', () => {
+          if (this.gameOver || this.gameWon || cellData.isRevealed) return;
+          isLongPress = false;
+          this.touchMoved = false;
+
+          touchTimer = setTimeout(() => {
+            isLongPress = true;
+            this.toggleFlag(cellData);
+            if (navigator.vibrate) navigator.vibrate(35);
+          }, 420);
+        }, { passive: true });
+
+        cellEl.addEventListener('touchmove', () => {
+          this.touchMoved = true;
+          clearTimeout(touchTimer);
+        }, { passive: true });
+
+        cellEl.addEventListener('touchend', (e) => {
+          clearTimeout(touchTimer);
+          if (isLongPress || this.touchMoved) {
+            e.preventDefault();
+            return;
+          }
+        });
+
+        // Regular click (Mouse / Touch tap)
+        cellEl.addEventListener('click', () => {
+          if (isLongPress) {
+            isLongPress = false;
+            return;
+          }
+          this.revealCell(cellData);
+        });
+      }
+
+      toggleFlag(cell) {
+        if (this.gameOver || this.gameWon || cell.isRevealed) return;
+
+        cell.isFlagged = !cell.isFlagged;
+        const cellEl = document.getElementById(`cell-${cell.r}-${cell.c}`);
+
+        if (cell.isFlagged) {
+          cellEl.classList.add('flagged');
+          cellEl.textContent = '🚩';
+        } else {
+          cellEl.classList.remove('flagged');
+          cellEl.textContent = '';
+        }
+
+        this.updateMinesCounter();
+      }
+
+      revealCell(cell) {
+        if (this.gameOver || this.gameWon || cell.isRevealed || cell.isFlagged) return;
+
+        // First click dynamic generation
+        if (!this.firstClickDone) {
+          this.generateDynamicMines(cell.r, cell.c);
+          this.firstClickDone = true;
+        }
+
+        if (cell.isMine) {
+          this.triggerGameOver(cell);
+          return;
+        }
+
+        this.floodFillReveal(cell);
+        this.checkWinCondition();
+      }
+
+      floodFillReveal(startCell) {
+        const queue = [startCell];
+        startCell.isRevealed = true;
+
+        while (queue.length > 0) {
+          const current = queue.shift();
+          const cellEl = document.getElementById(`cell-${current.r}-${current.c}`);
+
+          cellEl.classList.remove('hidden', 'flagged');
+          cellEl.classList.add('revealed');
+
+          if (current.isFlagged) {
+            current.isFlagged = false;
+          }
+
+          if (current.adjacentMines > 0) {
+            cellEl.textContent = current.adjacentMines;
+            cellEl.classList.add(`num-${current.adjacentMines}`);
+          } else {
+            cellEl.textContent = '';
+            // 8-directional neighbor flood-fill
+            this.forEachNeighbor(current.r, current.c, (neighbor) => {
+              if (!neighbor.isRevealed && !neighbor.isMine && !neighbor.isFlagged) {
+                neighbor.isRevealed = true;
+                queue.push(neighbor);
+              }
+            });
+          }
+        }
+
+        this.updateMinesCounter();
+      }
+
+      triggerGameOver(hitCell) {
+        this.gameOver = true;
+        this.gameStatusEl.textContent = "Vesztettél!";
+        this.gameStatusEl.style.color = "#ef5350";
+
+        // Reveal all mines
+        for (let r = 0; r < this.rows; r++) {
+          for (let c = 0; c < this.cols; c++) {
+            const cell = this.board[r][c];
+            if (!cell.isActive) continue;
+
+            const cellEl = document.getElementById(`cell-${r}-${c}`);
+            if (cell.isMine) {
+              cellEl.classList.remove('hidden', 'flagged');
+              cellEl.textContent = '💣';
+              if (cell === hitCell) {
+                cellEl.classList.add('mine-hit');
+              } else {
+                cellEl.classList.add('mine-revealed');
+              }
+            } else if (cell.isFlagged && !cell.isMine) {
+              // Incorrect flag
+              cellEl.textContent = '❌';
+            }
+          }
+        }
+
+        this.showOverlay(false);
+      }
+
+      checkWinCondition() {
+        let unrevealedSafeCells = 0;
+
+        for (let r = 0; r < this.rows; r++) {
+          for (let c = 0; c < this.cols; c++) {
+            const cell = this.board[r][c];
+            if (cell.isActive && !cell.isMine && !cell.isRevealed) {
+              unrevealedSafeCells++;
+            }
+          }
+        }
+
+        if (unrevealedSafeCells === 0) {
+          this.triggerWin();
+        }
+      }
+
+      triggerWin() {
+        this.gameWon = true;
+        this.gameStatusEl.textContent = "Győzelem!";
+        this.gameStatusEl.style.color = "#66bb6a";
+
+        // Auto-flag remaining mines
+        for (let r = 0; r < this.rows; r++) {
+          for (let c = 0; c < this.cols; c++) {
+            const cell = this.board[r][c];
+            if (cell.isActive && cell.isMine && !cell.isFlagged) {
+              cell.isFlagged = true;
+              const cellEl = document.getElementById(`cell-${r}-${c}`);
+              cellEl.classList.add('flagged');
+              cellEl.textContent = '🚩';
+            }
+          }
+        }
+
+        this.updateMinesCounter();
+        this.showOverlay(true);
+      }
+
+      updateMinesCounter() {
+        let flaggedCount = 0;
+        for (let r = 0; r < this.rows; r++) {
+          for (let c = 0; c < this.cols; c++) {
+            if (this.board[r][c].isFlagged) flaggedCount++;
+          }
+        }
+        const remaining = this.totalMines - flaggedCount;
+        this.minesLeftEl.textContent = remaining;
+      }
+
+      showOverlay(isWin) {
+        if (isWin) {
+          this.overlayTitle.textContent = "Győzelem! 🏆";
+          this.overlayTitle.className = "overlay-title win";
+          const isLastLevel = this.currentLevelIndex === this.levels.length - 1;
+          this.overlayMsg.textContent = isLastLevel
+            ? "Minden pályát sikeresen megtisztítottál a kincskereséshez! Gratulálunk!"
+            : "Sikeresen megtisztítottad a vizeket az aknáktól!";
+          this.overlayBtn.textContent = isLastLevel ? "Újrakezdés az elejétől ↻" : "Következő pálya ➔";
+        } else {
+          this.overlayTitle.textContent = "Bumm! Aknára léptél 💥";
+          this.overlayTitle.className = "overlay-title lose";
+          this.overlayMsg.textContent = "Ne csüggedj, a kincskereső kalózok sosem adják fel!";
+          this.overlayBtn.textContent = "Újrapróbálkozás ↻";
+        }
+        this.overlay.classList.add('visible');
+      }
+
+      hideOverlay() {
+        this.overlay.classList.remove('visible');
+      }
+
+      onOverlayBtnClick() {
+        if (this.gameWon) {
+          this.loadLevel(this.currentLevelIndex + 1);
+        } else {
+          this.restartLevel();
+        }
+      }
+
+      restartLevel() {
+        this.loadLevel(this.currentLevelIndex);
+      }
+    }
+
+    // Indítás az oldal betöltésekor
+    window.addEventListener('DOMContentLoaded', () => {
+      window.game = new MinesweeperGame(LEVELS_CONFIG);
+    });
+  </script>
+</body>
+</html>
